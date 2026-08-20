@@ -1,0 +1,27 @@
+version: 2
+
+models:
+  - name: stg_bookings
+    description: "row booking data."
+    columns:
+      - name: booking_id
+        description: "Primary key for the booking."
+        tests:
+          - unique
+          - not_null
+
+      - name: member_id
+        description: "secondary key for member"
+        tests:
+          - not_null
+          - relationships:
+              to: ref('stg_members')
+              field: member_id
+
+      - name: class_id
+        description: "secondary key for class"
+        tests:
+            - not_null
+            - relationships:
+                to: ref('stg_gym_classes')
+                field: class_id

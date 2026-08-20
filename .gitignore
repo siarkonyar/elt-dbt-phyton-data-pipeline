@@ -1,0 +1,74 @@
+# ─────────────────────────────────────────────
+# Secrets — never commit real credentials
+# ─────────────────────────────────────────────
+.env
+*.local.env
+# ...but DO commit the template
+!.env.example
+
+
+# ─────────────────────────────────────────────
+# dbt
+# ─────────────────────────────────────────────
+target/
+dbt_packages/
+dbt_internal_packages/
+logs/
+.user.yml
+
+
+# ─────────────────────────────────────────────
+# ELT run artefacts
+# ─────────────────────────────────────────────
+# pg_dump output produced by elt_script.py at runtime
+data_dump.sql
+*.dump
+
+
+# ─────────────────────────────────────────────
+# Python
+# ─────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.Python
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+
+# ─────────────────────────────────────────────
+# Operating system junk
+# ─────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+desktop.ini
+
+
+# ─────────────────────────────────────────────
+# Editors / IDEs
+# ─────────────────────────────────────────────
+.idea/
+*.swp
+*.swo
+*~
+.vscode/*
+# keep shared editor recommendations
+!.vscode/extensions.json
+!.vscode/settings.json
+
+
+# ─────────────────────────────────────────────
+# Logs & temp
+# ─────────────────────────────────────────────
+*.log
+tmp/
+.cache/

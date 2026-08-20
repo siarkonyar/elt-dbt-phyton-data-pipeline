@@ -1,0 +1,55 @@
+version: 2
+
+sources:
+  - name: gym
+    database: destination_db
+    schema: public
+    tables:
+      - name: trainers
+        description: "Raw trainer data loaded from source_db via the ELT pipeline."
+        columns:
+          - name: trainer_id
+            description: "Primary key for the trainer."
+          - name: first_name
+          - name: last_name
+          - name: specialty
+          - name: email
+          - name: hire_date
+
+      - name: members
+        description: "Raw member data loaded from source_db via the ELT pipeline."
+        columns:
+          - name: member_id
+            description: "Primary key for the member."
+          - name: first_name
+          - name: last_name
+          - name: email
+          - name: date_of_birth
+          - name: gender
+          - name: join_date
+          - name: membership_type
+          - name: monthly_fee
+
+      - name: gym_classes
+        description: "Raw gym class data loaded from source_db via the ELT pipeline."
+        columns:
+          - name: class_id
+            description: "Primary key for the gym class."
+          - name: class_name
+          - name: trainer_id
+            description: "Foreign key to the trainer who teaches the class."
+          - name: category
+          - name: duration_mins
+          - name: max_capacity
+
+      - name: bookings
+        description: "Raw booking data loaded from source_db via the ELT pipeline."
+        columns:
+          - name: booking_id
+            description: "Primary key for the booking."
+          - name: member_id
+            description: "Foreign key to the member who made the booking."
+          - name: class_id
+            description: "Foreign key to the gym class that was booked."
+          - name: booking_date
+          - name: status

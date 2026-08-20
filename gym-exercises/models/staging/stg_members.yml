@@ -1,0 +1,16 @@
+version: 2
+
+models:
+  - name: stg_members
+    description: "row members data."
+    columns:
+      - name: member_id
+        description: "Primary key for the member."
+        tests:
+          - unique
+          - not_null
+
+      - name: email
+        tests:
+            - unique
+            - not_null
