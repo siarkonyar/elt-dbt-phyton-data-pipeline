@@ -44,7 +44,7 @@ services:
       [
         "run",
         "--profiles-dir",
-        "/root",
+        "/dbt",
         "--project-dir",
         "/dbt"
       ]
@@ -52,7 +52,6 @@ services:
       - elt_network
     volumes:
       - ./gym-exercises:/dbt
-      - ~/.dbt:/root
     depends_on:
       elt_script:
         condition: service_completed_successfully
