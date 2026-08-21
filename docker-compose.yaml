@@ -1,5 +1,3 @@
-version: '3'
-
 services:
   source_postgres:
     image: postgres:13
@@ -24,37 +22,142 @@ services:
       POSTGRES_DB: destination_db
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: secret
+  #   volumes:
+  #     - destination_db_data:/var/lib/postgresql/data
 
-  elt_script:
+  # elt_script:
+  #   build:
+  #     context: ./elt_script # Directory containing the Dockerfile and elt_script.py
+  #     dockerfile: Dockerfile # Name of the Dockerfile, if it's something other than "Dockerfile", specify here
+  #   command: ['python', 'elt_script.py']
+  #   env_file:
+  #     - ./elt_script/.env
+  #   networks:
+  #     - elt_network
+  #   depends_on:
+  #     - source_postgres
+  #     - destination_postgres
+
+  # dbt:
+  #   image: ghcr.io/dbt-labs/dbt-postgres:1.4.7
+  #   command:
+  #     [
+  #       "run",
+  #       "--profiles-dir",
+  #       "/dbt",
+  #       "--project-dir",
+  #       "/dbt"
+  #     ]
+  #   networks:
+  #     - elt_network
+  #   volumes:
+  #     - ./gym:/dbt
+  #   depends_on:
+  #     elt_script:
+  #       condition: service_completed_successfully
+
+  # this db container is for airflow to store metadata like logs
+  postgres:
+    image: postgres:latest
+    networks:
+      - elt_network
+    environment:
+      - POSTGRES_USER=airflow
+      - POSTGRES_PASSWORD=airflow
+      - POSTGRES_DB=airflow
+
+  init-airflow:
+    image: apache/airflow:2.7.2
+    depends_on:
+      - postgres
+    networks:
+      - elt_network
+    environment:
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+    command: >
+      bash -c "airflow db init && airflow users create --username airflow --password password --firstname Siar --lastname Konyar --role Admin --email admin@example.com"
+
+
+  web_service:
     build:
-      context: ./elt_script # Directory containing the Dockerfile and elt_script.py
-      dockerfile: Dockerfile # Name of the Dockerfile, if it's something other than "Dockerfile", specify here
-    command: ['python', 'elt_script.py']
-    env_file:
-      - ./elt_script/.env
-    networks:
-      - elt_network
+      context: .
+      dockerfile: Dockerfile
+    user: root
+    # Waiting on postgres alone is not enough: the tables only exist once
+    # init-airflow has finished creating them.
     depends_on:
-      - source_postgres
-      - destination_postgres
-
-  dbt:
-    image: ghcr.io/dbt-labs/dbt-postgres:1.4.7
-    command:
-      [
-        "run",
-        "--profiles-dir",
-        "/dbt",
-        "--project-dir",
-        "/dbt"
-      ]
-    networks:
-      - elt_network
-    volumes:
-      - ./gym-exercises:/dbt
-    depends_on:
-      elt_script:
+      postgres:
+        condition: service_started
+      init-airflow:
         condition: service_completed_successfully
+    networks:
+      - elt_network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./elt_script:/opt/airflow/elt_script
+      - ./gym:/dbt
+      - ~/.dbt:/root/.dbt
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - LOAD_EX=n
+      - EXECUTOR=Local
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW_CONN_DESTINATION_POSTGRES=postgres://postgres:secret@destination_postgres:5432/destination_db
+      #python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+      - AIRFLOW__CORE__FERNET_KEY=NEAGdNJSPZsFUocwGW6GSyBGsVk8yP6bh1lIuFPC4ZM=
+      - AIRFLOW__WEBSERVER__DEFAULT_USER_USERNAME=airflow
+      - AIRFLOW__WEBSERVER__DEFAULT_USER_PASSWORD=password
+      - AIRFLOW_WWW_USER_USERNAME=airflow
+      - AIRFLOW_WWW_USER_PASSWORD=password
+      - AIRFLOW__WEBSERVER__SECRET_KEY=secret
+      # Same host paths as the scheduler: the webserver parses the DAG file too,
+      # and would report an import error without them.
+      - HOST_PROJECT_PATH=${PWD}
+      - HOST_HOME=${HOME}
+    ports:
+      - "8080:8080"
+    command: webserver
+
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    user: root
+    depends_on:
+      postgres:
+        condition: service_started
+      init-airflow:
+        condition: service_completed_successfully
+    networks:
+      - elt_network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./elt_script:/opt/airflow/elt_script
+      - ./gym:/dbt
+      - ~/.dbt:/root/.dbt
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - LOAD_EX=n
+      - EXECUTOR=Local
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW_CONN_DESTINATION_POSTGRES=postgres://postgres:secret@destination_postgres:5432/destination_db
+      - AIRFLOW__CORE__FERNET_KEY=NEAGdNJSPZsFUocwGW6GSyBGsVk8yP6bh1lIuFPC4ZM=
+      - AIRFLOW__WEBSERVER__SECRET_KEY=secret
+      - AIRFLOW_WWW_USER_USERNAME=airflow
+      - AIRFLOW_WWW_USER_PASSWORD=password
+      # Read by elt_script.py, which now runs inside this container instead of
+      # its own service (where these came from ./elt_script/.env).
+      - SOURCE_POSTGRES_PASSWORD=secret
+      - DESTINATION_POSTGRES_PASSWORD=secret
+      # Host paths, substituted by Compose from the shell that runs it. The DAG
+      # needs these because DockerOperator mounts are resolved by the host daemon.
+      - HOST_PROJECT_PATH=${PWD}
+      - HOST_HOME=${HOME}
+    command: scheduler
 
 
 
@@ -62,3 +165,6 @@ services:
 networks:
   elt_network:
     driver: bridge
+
+volumes:
+  destination_db_data:
