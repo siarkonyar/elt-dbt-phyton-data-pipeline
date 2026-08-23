@@ -38,24 +38,6 @@ services:
       - source_postgres
       - destination_postgres
 
-  dbt:
-    image: ghcr.io/dbt-labs/dbt-postgres:1.4.7
-    command:
-      [
-        "run",
-        "--profiles-dir",
-        "/dbt",
-        "--project-dir",
-        "/dbt"
-      ]
-    networks:
-      - elt_network
-    volumes:
-      - ./gym-exercises:/dbt
-    depends_on:
-      elt_script:
-        condition: service_completed_successfully
-
 
 
 
