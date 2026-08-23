@@ -31,7 +31,7 @@ services:
       dockerfile: Dockerfile # Name of the Dockerfile, if it's something other than "Dockerfile", specify here
     command: ['python', 'elt_script.py']
     env_file:
-      - ./elt_script/.env
+      - ./.env
     networks:
       - elt_network
     depends_on:
@@ -44,7 +44,7 @@ services:
       dockerfile: Dockerfile
     image: elt_transform:latest
     env_file:
-      - ./elt_script/.env
+      - ./.env
     networks:
       - elt_network
     depends_on:

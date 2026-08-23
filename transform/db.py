@@ -13,15 +13,17 @@ def get_engine():
   if not PASSWORD:
       raise RuntimeError(
           "DESTINATION_POSTGRES_PASSWORD is not set. "
-          "Check that docker-compose.yaml passes ./elt_script/.env to this service."
+          "Check that docker-compose.yaml passes .env to this service."
       )
 
   url = f"postgresql+psycopg2://{USER}:{PASSWORD}@{HOST}:{PORT}/{DB_NAME}"
   return create_engine(url)
 
+#pulls the data as DataFrame
 def read_table(engine, table_name):
     return pd.read_sql(f"SELECT * FROM {table_name}", engine)
 
+#writes the dataframe to the database
 def write_table(engine, df, table_name):
     df.to_sql(table_name, engine, if_exists="replace", index=False)
     return len(df)
