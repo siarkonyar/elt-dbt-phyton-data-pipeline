@@ -38,7 +38,18 @@ services:
       - source_postgres
       - destination_postgres
 
-
+  transform:
+    build:
+      context: ./transform
+      dockerfile: Dockerfile
+    image: elt_transform:latest
+    env_file:
+      - ./elt_script/.env
+    networks:
+      - elt_network
+    depends_on:
+      elt_script:
+        condition: service_completed_successfully
 
 
 networks:
