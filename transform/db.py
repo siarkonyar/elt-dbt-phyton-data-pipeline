@@ -18,3 +18,10 @@ def get_engine():
 
   url = f"postgresql+psycopg2://{USER}:{PASSWORD}@{HOST}:{PORT}/{DB_NAME}"
   return create_engine(url)
+
+def read_table(engine, table_name):
+    return pd.read_sql(f"SELECT * FROM {table_name}", engine)
+
+def write_table(engine, df, table_name):
+    df.to_sql(table_name, engine, if_exists="replace", index=False)
+    return len(df)
