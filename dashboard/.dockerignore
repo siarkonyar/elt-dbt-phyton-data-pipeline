@@ -1,0 +1,23 @@
+# Keep the build context small. Docker copies everything here into the
+# image with `COPY . .`, so anything listed below never reaches the image.
+
+# Local virtualenv -- built against macOS paths, useless inside the image
+.venv/
+venv/
+
+# Python bytecode compiled on the host
+__pycache__/
+*.pyc
+*.pyo
+
+# Streamlit's local run state
+.streamlit/secrets.toml
+
+# Editor / OS noise
+.DS_Store
+.vscode/
+.idea/
+
+# Secrets never belong in an image layer; compose passes them via env_file
+.env
+*.local.env
