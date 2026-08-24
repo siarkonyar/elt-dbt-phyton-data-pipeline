@@ -3,6 +3,7 @@ name: CI
 # No `branches:` filter means every branch.
 on:
   push:
+    branches: [main]
   pull_request:
 
 # One run per branch. `head_ref` is set on pull_request events and `ref_name` on
