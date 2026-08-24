@@ -1,19 +1,6 @@
 version: '3'
 
 services:
-  source_postgres:
-    image: postgres:13
-    ports:
-      - '5433:5432'
-    networks:
-      - elt_network
-    environment:
-      POSTGRES_DB: source_db
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: secret
-    volumes:
-      - ./source_db_init/init.sql:/docker-entrypoint-initdb.d/init.sql
-
   destination_postgres:
     image: postgres:13
     ports:
@@ -23,20 +10,27 @@ services:
     environment:
       POSTGRES_DB: destination_db
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: secret
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - destination_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d destination_db']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
 
-  elt_script:
+  ingest:
     build:
-      context: ./elt_script # Directory containing the Dockerfile and elt_script.py
-      dockerfile: Dockerfile # Name of the Dockerfile, if it's something other than "Dockerfile", specify here
-    command: ['python', 'elt_script.py']
+      context: ./ingest
+      dockerfile: Dockerfile
     env_file:
       - ./.env
     networks:
       - elt_network
     depends_on:
-      - source_postgres
-      - destination_postgres
+      destination_postgres:
+        condition: service_healthy
 
   transform:
     build:
@@ -48,7 +42,7 @@ services:
     networks:
       - elt_network
     depends_on:
-      elt_script:
+      ingest:
         condition: service_completed_successfully
 
   dashboard:
@@ -62,9 +56,11 @@ services:
     networks:
       - elt_network
     depends_on:
-      - source_postgres
-      - destination_postgres
+      destination_postgres:
+        condition: service_healthy
 
+volumes:
+  destination_data:
 
 networks:
   elt_network:
