@@ -1,3 +1,4 @@
+from checks import run_all_checks
 from db import get_engine, read_table, write_table
 from marts import build_dim_attendance, build_fct_bookings
 from staging import STAGING_COLUMNS, build_staging
@@ -32,6 +33,9 @@ def main():
   #Nothing has touched the database yet -- everything above happened in
   #memory. We only write once every table has been built successfully,
   #so a crash halfway through cannot leave half-updated tables behind.
+  print("Running data-quality checks...")
+  run_all_checks(staged, fct_bookings, dim_attendance)
+
   outputs = {
     "stg_trainers": staged["trainers"],
     "stg_members": staged["members"],

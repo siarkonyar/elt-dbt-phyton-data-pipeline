@@ -1,0 +1,141 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A second push to the same branch cancels the run still in flight.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Must match POSTGRES_PASSWORD for both database services in
+  # docker-compose.yaml. These are throwaway credentials for containers that
+  # live and die inside this job -- nothing here is a real secret.
+  POSTGRES_PASSWORD: secret
+  READINESS_ATTEMPTS: 30
+  READINESS_DELAY_SECONDS: 2
+
+jobs:
+  pipeline:
+    name: Pipeline end-to-end
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      # .env is gitignored, so a fresh checkout does not have one. Every
+      # service in docker-compose.yaml declares `env_file: ./.env` and compose
+      # refuses to start without it.
+      - name: Write .env for docker compose
+        run: |
+          cat > .env <<EOF
+          SOURCE_POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+          DESTINATION_POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+          EOF
+
+      # Building up front keeps image build failures separate from pipeline
+      # failures, so a red job points at the right thing.
+      - name: Build images
+        run: docker compose build
+
+      - name: Start databases
+        run: docker compose up -d source_postgres destination_postgres
+
+      # The postgres image runs init.sql before it accepts outside traffic, so
+      # "port is open" is not the same as "the seed data is in". Querying the
+      # last table init.sql creates is the honest check.
+      - name: Wait for source_db to finish seeding
+        run: |
+          for attempt in $(seq 1 "$READINESS_ATTEMPTS"); do
+            rows=$(docker compose exec -T source_postgres \
+              psql -U postgres -d source_db -tAc \
+              "SELECT count(*) FROM bookings;" 2>/dev/null || true)
+            if [ -n "$rows" ] && [ "$rows" -gt 0 ] 2>/dev/null; then
+              echo "source_db seeded: $rows bookings"
+              exit 0
+            fi
+            echo "attempt $attempt/$READINESS_ATTEMPTS: not seeded yet"
+            sleep "$READINESS_DELAY_SECONDS"
+          done
+          echo "::error::source_db never finished seeding"
+          exit 1
+
+      - name: Wait for destination_db to accept connections
+        run: |
+          for attempt in $(seq 1 "$READINESS_ATTEMPTS"); do
+            if docker compose exec -T destination_postgres \
+              pg_isready -U postgres -d destination_db >/dev/null 2>&1; then
+              echo "destination_db is accepting connections"
+              exit 0
+            fi
+            echo "attempt $attempt/$READINESS_ATTEMPTS: not ready yet"
+            sleep "$READINESS_DELAY_SECONDS"
+          done
+          echo "::error::destination_db never became ready"
+          exit 1
+
+      # `docker compose up --abort-on-container-exit` cannot be used here: it
+      # stops every container as soon as ANY container exits, and elt_script is
+      # meant to exit. Running each stage with `compose run` keeps them ordered
+      # and gives each one its own exit code.
+      - name: Extract and load (elt_script)
+        run: docker compose run --rm elt_script
+
+      # --no-deps because elt_script already ran above; without it compose would
+      # re-run the whole copy to satisfy the depends_on condition.
+      # This step also runs transform/checks.py, so a DataQualityError fails CI.
+      - name: Transform and run data-quality checks
+        run: docker compose run --rm --no-deps transform
+
+      # transform's own checks pass on in-memory DataFrames. This confirms the
+      # write to Postgres actually landed.
+      - name: Verify the transformed tables landed
+        run: |
+          tables="stg_trainers stg_members stg_gym_classes stg_bookings fct_bookings dim_attendance"
+          failed=0
+          for table in $tables; do
+            rows=$(docker compose exec -T destination_postgres \
+              psql -U postgres -d destination_db -tAc \
+              "SELECT count(*) FROM $table;" 2>/dev/null || echo "")
+            if [ -z "$rows" ]; then
+              echo "::error::$table is missing from destination_db"
+              failed=1
+            elif [ "$rows" -eq 0 ]; then
+              echo "::error::$table exists but is empty"
+              failed=1
+            else
+              echo "$table: $rows rows"
+            fi
+          done
+          exit "$failed"
+
+      - name: Start the dashboard
+        run: docker compose up -d dashboard
+
+      - name: Smoke-test the dashboard
+        run: |
+          for attempt in $(seq 1 "$READINESS_ATTEMPTS"); do
+            if curl -fsS http://localhost:8501/_stcore/health >/dev/null; then
+              echo "dashboard is serving"
+              exit 0
+            fi
+            echo "attempt $attempt/$READINESS_ATTEMPTS: dashboard not up yet"
+            sleep "$READINESS_DELAY_SECONDS"
+          done
+          echo "::error::dashboard never became healthy"
+          exit 1
+
+      # Without this a failed run shows only "exit code 1" with no explanation.
+      - name: Show container logs on failure
+        if: failure()
+        run: docker compose logs --no-color --tail=200
+
+      - name: Tear down
+        if: always()
+        run: docker compose down --volumes --remove-orphans

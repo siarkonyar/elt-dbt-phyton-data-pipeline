@@ -105,4 +105,4 @@ def classify_attendance(booking_counts):
         NEVER_BOOKED,
         TRIED_ONCE,
     ]
-    return np.select(conditions, labels, default=REGULAR)
+    return np.select(conditions, labels, default=REGULAR)#mask
