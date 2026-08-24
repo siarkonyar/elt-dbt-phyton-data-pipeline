@@ -1,7 +1,8 @@
 import time
 from dataclasses import dataclass
 from urllib.parse import urlencode
-
+from typing import Any, Callable
+from config import MAX_PAGE_SIZE
 import requests
 
 BASE_URL = "https://datasets-server.huggingface.co"
@@ -86,3 +87,104 @@ def parse_rows(entries, text_column, label_column):
         )
 
     return tuple(parsed)#tuple because it should be immutable
+
+USER_AGENT = "siar-elt-ingest/1.0"
+
+def build_session():
+    session = requests.Session()
+    session.headers.update({"User-Agent": USER_AGENT})
+    return session
+
+@dataclass(frozen=True)
+class HfDatasetsClient:
+    session: Any
+    text_column: str
+    label_column: str
+    timeout_seconds: float
+    max_retries: int
+    base_url: str = BASE_URL
+    sleep: Callable = time.sleep
+
+    def _decode(self, response, url):
+        try:
+            return response.json()
+        except ValueError as error:
+            raise HfApiError(
+                f"{url} returned HTTP 200 but the body is not JSON: "
+                f"{response.text[:200]}"
+            ) from error
+
+    def _get(self, path, params):
+        """GET a JSON document, retrying only the failures worth retrying."""
+        url = f"{self.base_url}/{path}?{urlencode(params)}"
+        last_problem = None
+
+        for attempt in range(self.max_retries + 1):
+            try:
+                response = self.session.get(url, timeout=self.timeout_seconds)
+            except (requests.Timeout, requests.ConnectionError) as error:
+                last_problem = f"{type(error).__name__}: {error}"
+            else:
+                if response.status_code == 200:
+                    return self._decode(response, url), url
+
+                if response.status_code not in RETRY_STATUS_CODES:
+                    raise HfApiError(
+                        f"{url} returned HTTP {response.status_code}, "
+                        f"which will not change on a retry: {response.text[:200]}"
+                    )
+
+                last_problem = f"HTTP {response.status_code}: {response.text[:200]}"
+
+            if attempt < self.max_retries:
+                self.sleep(BACKOFF_BASE_SECONDS * 2**attempt)
+
+        raise HfApiError(
+            f"{url} failed {self.max_retries + 1} times. Last problem: {last_problem}"
+        )
+
+    def fetch_page(self, dataset_name, dataset_config, split, offset, length):
+        """Fetch one page of rows and return it in our own shape."""
+        if length > MAX_PAGE_SIZE:
+            raise ValueError(
+                f"length must not be greater than {MAX_PAGE_SIZE} "
+                f"(the API's cap), got {length}"
+            )
+
+        payload, url = self._get(
+            "rows",
+            {
+                "dataset": dataset_name,
+                "config": dataset_config,
+                "split": split,
+                "offset": offset,
+                "length": length,
+            },
+        )
+
+        for key in ("rows", "features", "num_rows_total"):
+            if key not in payload:
+                raise HfApiError(
+                    f"{url} returned JSON without {key!r}; "
+                    f"got keys {sorted(payload)}"
+                )
+
+        return Page(
+            rows=parse_rows(payload["rows"], self.text_column, self.label_column),
+            num_rows_total=payload["num_rows_total"],
+            label_names=parse_label_names(payload["features"], self.label_column),
+            url=url,
+        )
+
+    def fetch_splits(self, dataset_name):
+        """Return the (config, split) pairs this dataset offers."""
+        payload, url = self._get("splits", {"dataset": dataset_name})
+
+        if "splits" not in payload:
+            raise HfApiError(
+                f"{url} returned JSON without 'splits'; got keys {sorted(payload)}"
+            )
+
+        return tuple(
+            (entry.get("config"), entry.get("split")) for entry in payload["splits"]
+        )
