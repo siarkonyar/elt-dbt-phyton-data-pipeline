@@ -1,5 +1,3 @@
-version: '3'
-
 services:
   destination_postgres:
     image: postgres:13
@@ -26,6 +24,11 @@ services:
       dockerfile: Dockerfile
     env_file:
       - ./.env
+    environment:
+      # One password lives in .env. Postgres above takes it as POSTGRES_PASSWORD;
+      # the Python services look for DESTINATION_POSTGRES_PASSWORD, so compose
+      # hands them the same value under that name. Nothing to keep in sync.
+      DESTINATION_POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     networks:
       - elt_network
     depends_on:
@@ -39,6 +42,8 @@ services:
     image: elt_transform:latest
     env_file:
       - ./.env
+    environment:
+      DESTINATION_POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     networks:
       - elt_network
     depends_on:
@@ -53,6 +58,8 @@ services:
       - '8501:8501'
     env_file:
       - ./.env
+    environment:
+      DESTINATION_POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     networks:
       - elt_network
     depends_on:

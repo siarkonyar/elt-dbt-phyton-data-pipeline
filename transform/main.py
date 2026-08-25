@@ -29,8 +29,9 @@ def build_dataset(raw):
     frame = raw.rename(columns={"split": "source_split", "row_idx": "source_row_idx"})
 
     frame = frame.assign(text_clean=normalize_text(frame["text"]))
-    frame = add_text_stats(frame)
+    frame = add_text_stats(frame)#adds columns for text stats to the dataframe
 
+    #filters the frame, eliminates too short or too long texts
     before = len(frame)
     frame = frame[frame["text_clean"].str.len() > 0]
     frame = frame[frame["word_count"].between(MIN_WORD_COUNT, MAX_WORD_COUNT)]
@@ -38,6 +39,7 @@ def build_dataset(raw):
 
     frame = frame.assign(example_id=content_hash(frame["text_clean"]))
 
+    #filter duplicates
     before = len(frame)
     frame = drop_duplicate_texts(frame, order_column="source_row_idx")
     print(f"  deduplicated: {before} -> {len(frame)} rows")

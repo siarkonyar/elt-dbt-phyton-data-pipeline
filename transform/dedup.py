@@ -1,4 +1,5 @@
-"""One row per distinct text, with a stable id for each."""
+"""this file gives every emaple a unique id by hashing. ad if any emaple shares the same example id,
+it means it is duplicate and needs to be deleted"""
 
 import hashlib
 
