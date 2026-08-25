@@ -1,19 +1,4 @@
-version: '3'
-
 services:
-  source_postgres:
-    image: postgres:13
-    ports:
-      - '5433:5432'
-    networks:
-      - elt_network
-    environment:
-      POSTGRES_DB: source_db
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: secret
-    volumes:
-      - ./source_db_init/init.sql:/docker-entrypoint-initdb.d/init.sql
-
   destination_postgres:
     image: postgres:13
     ports:
@@ -23,41 +8,66 @@ services:
     environment:
       POSTGRES_DB: destination_db
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: secret
-
-  elt_script:
-    build:
-      context: ./elt_script # Directory containing the Dockerfile and elt_script.py
-      dockerfile: Dockerfile # Name of the Dockerfile, if it's something other than "Dockerfile", specify here
-    command: ['python', 'elt_script.py']
-    env_file:
-      - ./elt_script/.env
-    networks:
-      - elt_network
-    depends_on:
-      - source_postgres
-      - destination_postgres
-
-  dbt:
-    image: ghcr.io/dbt-labs/dbt-postgres:1.4.7
-    command:
-      [
-        "run",
-        "--profiles-dir",
-        "/dbt",
-        "--project-dir",
-        "/dbt"
-      ]
-    networks:
-      - elt_network
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
-      - ./gym-exercises:/dbt
+      - destination_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d destination_db']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+  ingest:
+    build:
+      context: ./ingest
+      dockerfile: Dockerfile
+    env_file:
+      - ./.env
+    environment:
+      # One password lives in .env. Postgres above takes it as POSTGRES_PASSWORD;
+      # the Python services look for DESTINATION_POSTGRES_PASSWORD, so compose
+      # hands them the same value under that name. Nothing to keep in sync.
+      DESTINATION_POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    networks:
+      - elt_network
     depends_on:
-      elt_script:
+      destination_postgres:
+        condition: service_healthy
+
+  transform:
+    build:
+      context: ./transform
+      dockerfile: Dockerfile
+    image: elt_transform:latest
+    env_file:
+      - ./.env
+    environment:
+      DESTINATION_POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    networks:
+      - elt_network
+    depends_on:
+      ingest:
         condition: service_completed_successfully
 
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    ports:
+      - '8501:8501'
+    env_file:
+      - ./.env
+    environment:
+      DESTINATION_POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    networks:
+      - elt_network
+    depends_on:
+      destination_postgres:
+        condition: service_healthy
 
-
+volumes:
+  destination_data:
 
 networks:
   elt_network:
