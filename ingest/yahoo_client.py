@@ -36,7 +36,6 @@ class Quote:
     currency: str
     short_name: str
     exchange: str
-    market_open: bool
     source_url: str
 
 def to_utc(epoch_seconds):
@@ -76,7 +75,6 @@ def parse_quote(meta, url, now=None):
         currency=meta.get("currency"),
         short_name=meta.get("shortName"),
         exchange=meta.get("fullExchangeName"),
-        market_open=is_market_open(meta, now),
         source_url=url,
     )
 

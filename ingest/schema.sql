@@ -11,7 +11,6 @@ CREATE TABLE IF NOT EXISTS raw_stock_quotes (
     currency            TEXT,
     short_name          TEXT,
     exchange            TEXT,
-    market_open         BOOLEAN,
     source_url          TEXT,
     fetched_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
 
@@ -25,6 +24,7 @@ CREATE TABLE IF NOT EXISTS poll_runs (
     started_at        TIMESTAMPTZ NOT NULL,
     finished_at       TIMESTAMPTZ,
     symbols           TEXT,
+    market_open       BOOLEAN,
     requests_made     INTEGER,
     rows_inserted     INTEGER,
     throttled_seconds NUMERIC,
