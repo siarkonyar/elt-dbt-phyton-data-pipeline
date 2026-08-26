@@ -128,3 +128,19 @@ class YahooClient:
         raise YahooApiError(
             f"{url} failed {self.max_retries + 1} times. Last problem: {last_problem}"
         )
+
+    def fetch_quote(self, symbol):
+        payload, url = self._get(
+            f"v8/finance/chart/{urlquote(symbol, safe='')}",
+            {"range": CHART_RANGE, "interval": CHART_INTERVAL},
+        )
+
+        chart = payload.get("chart") or {}
+        if chart.get("error"):
+            raise YahooApiError(f"{url} returned an error: {chart['error']}")
+
+        results = chart.get("result") or []
+        if not results:
+            raise YahooApiError(f"{url} returned no result for {symbol!r}")
+
+        return parse_quote(results[0].get("meta") or {}, url)
