@@ -36,3 +36,22 @@ def _read_number(env, name, parse):
         return parse(raw)
     except (TypeError, ValueError) as error:
         raise ConfigError(f"{name} must be a number, got {raw!r}") from error
+
+def load_config(env=None):
+    env = os.environ if env is None else env
+
+    timeout_seconds = _read_number(env, "YAHOO_TIMEOUT_SECONDS", float)
+    max_retries = _read_number(env, "YAHOO_MAX_RETRIES", int)
+
+    if timeout_seconds <= 0:
+        raise ConfigError(f"YAHOO_TIMEOUT_SECONDS must be positive, got {timeout_seconds}")
+
+    if max_retries < 0:
+        raise ConfigError(f"YAHOO_MAX_RETRIES cannot be negative, got {max_retries}")
+
+    return IngestConfig(
+        symbols=parse_symbols(env.get("STOCK_SYMBOLS", DEFAULTS["STOCK_SYMBOLS"])),
+        base_url=env.get("YAHOO_BASE_URL", DEFAULTS["YAHOO_BASE_URL"]).rstrip("/"),
+        timeout_seconds=timeout_seconds,
+        max_retries=max_retries,
+    )
