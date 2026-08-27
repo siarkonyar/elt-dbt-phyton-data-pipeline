@@ -3,7 +3,7 @@ import sys
 from config import ConfigError, load_config
 from db import apply_schema, get_engine
 from writer import upsert_quotes
-from yahoo_client import YahooApiError, YahooClient, build_session
+from ingest.client import YahooApiError, YahooClient, build_session
 
 def fetch_all(client, symbols):
     quotes = []

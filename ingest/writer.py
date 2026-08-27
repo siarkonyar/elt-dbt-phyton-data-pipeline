@@ -5,13 +5,11 @@ from sqlalchemy import text
 INSERT_SQL = text(
     """
     INSERT INTO raw_stock_quotes
-        (symbol, quote_ts, price, previous_close, day_high, day_low, volume,
-          fifty_two_week_high, fifty_two_week_low, currency, short_name,
-          exchange, source_url)
+        (symbol, quote_ts, price, day_open, day_high, day_low,
+        previous_close, change, pct_change, source_url)
     VALUES
-        (:symbol, :quote_ts, :price, :previous_close, :day_high, :day_low, :volume,
-          :fifty_two_week_high, :fifty_two_week_low, :currency, :short_name,
-          :exchange, :source_url)
+        (:symbol, :quote_ts, :price, :day_open, :day_high, :day_low,
+        :previous_close, :change, :pct_change, :source_url)
     ON CONFLICT (symbol, quote_ts) DO NOTHING
     """
 )

@@ -1,21 +1,18 @@
 CREATE TABLE IF NOT EXISTS raw_stock_quotes (
-    symbol              TEXT        NOT NULL,
-    quote_ts            TIMESTAMPTZ NOT NULL,
-    price               NUMERIC,
-    previous_close      NUMERIC,
-    day_high            NUMERIC,
-    day_low             NUMERIC,
-    volume              BIGINT,
-    fifty_two_week_high NUMERIC,
-    fifty_two_week_low  NUMERIC,
-    currency            TEXT,
-    short_name          TEXT,
-    exchange            TEXT,
-    source_url          TEXT,
-    fetched_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    symbol         TEXT        NOT NULL,
+    quote_ts       TIMESTAMPTZ NOT NULL,
+    price          NUMERIC,
+    day_open       NUMERIC,
+    day_high       NUMERIC,
+    day_low        NUMERIC,
+    previous_close NUMERIC,
+    change         NUMERIC,
+    pct_change     NUMERIC,
+    source_url     TEXT,
+    fetched_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
 
-    -- Yahoo repeats the same regularMarketTime until the price actually
-    -- moves, so this key turns every duplicate poll into a no-op insert.
+    -- Finnhub repeats the same `t` until the price actually moves, so this
+    -- key turns every duplicate poll into a no-op insert.
     PRIMARY KEY (symbol, quote_ts)
 );
 
@@ -25,6 +22,7 @@ CREATE TABLE IF NOT EXISTS poll_runs (
     finished_at       TIMESTAMPTZ,
     symbols           TEXT,
     market_open       BOOLEAN,
+    session           TEXT,
     requests_made     INTEGER,
     rows_inserted     INTEGER,
     throttled_seconds NUMERIC,
