@@ -22,6 +22,7 @@ services:
     build:
       context: ./ingest
       dockerfile: Dockerfile
+    restart: unless-stopped
     env_file:
       - ./.env
     environment:
@@ -35,25 +36,11 @@ services:
       destination_postgres:
         condition: service_healthy
 
-  transform:
-    build:
-      context: ./transform
-      dockerfile: Dockerfile
-    image: elt_transform:latest
-    env_file:
-      - ./.env
-    environment:
-      DESTINATION_POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-    networks:
-      - elt_network
-    depends_on:
-      ingest:
-        condition: service_completed_successfully
-
   dashboard:
     build:
       context: ./dashboard
       dockerfile: Dockerfile
+    restart: unless-stopped
     ports:
       - '8501:8501'
     env_file:

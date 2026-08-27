@@ -1,110 +1,201 @@
+import os
+
 import pandas as pd
 import streamlit as st
+from sqlalchemy import text
 
-from db import get_destination_engine, read_table, table_exists
+from db import get_destination_engine, table_exists
 
-st.set_page_config(page_title="Training dataset", page_icon="📊", layout="wide")
+st.set_page_config(page_title="Live stocks", page_icon="📈", layout="wide")
 
-SPLIT_ORDER = ("train", "validation", "test")
+HISTORY_HOURS = int(os.environ.get("HISTORY_HOURS", "24"))
+REFRESH = "15s"
+CACHE_TTL = 10
+
+# One row per symbol: the newest quote we hold. DISTINCT ON is the Postgres
+# shortcut for "first row of each group" and rides the (symbol, quote_ts)
+# primary key, so it stays fast as the table grows.
+LATEST_SQL = text(
+    """
+    SELECT DISTINCT ON (symbol)
+          symbol, quote_ts, price, day_open, day_high, day_low,
+          previous_close, change, pct_change
+      FROM raw_stock_quotes
+      ORDER BY symbol, quote_ts DESC
+    """
+)
+
+# Downsample to one point per minute. 15-second polling over 24 hours is
+# 5,760 rows per symbol; a browser cannot draw that, and it carries no more
+# information than the per-minute closes.
+HISTORY_SQL = text(
+    """
+    SELECT DISTINCT ON (symbol, date_trunc('minute', quote_ts))
+          symbol,
+          date_trunc('minute', quote_ts) AS minute,
+          price
+      FROM raw_stock_quotes
+    WHERE quote_ts >= now() - make_interval(hours => :hours)
+    ORDER BY symbol, date_trunc('minute', quote_ts), quote_ts DESC
+    """
+)
+
+POLLS_SQL = text(
+    """
+    SELECT poll_id, started_at, finished_at, market_open, session,
+          requests_made, rows_inserted, throttled_seconds, retries,
+          breaker_state, status, error_message
+      FROM poll_runs
+    ORDER BY poll_id DESC
+    LIMIT 50
+    """
+)
 
 
-# streamlit re-runs the whole script on every interaction, so the queries are
-# cached. `_engine` is excluded from the cache key (it is unhashable); the real
-# key is db_label + table_name.
-@st.cache_data(ttl=60, show_spinner=False)
-def load(_engine, db_label, table_name):
-    return read_table(_engine, table_name)
+# Streamlit re-runs the script on every interaction, so queries are cached.
+# The leading underscore keeps the unhashable engine out of the cache key.
+@st.cache_data(ttl=CACHE_TTL, show_spinner=False)
+def load_latest(_engine):
+    return pd.read_sql(LATEST_SQL, _engine)
+
+
+@st.cache_data(ttl=CACHE_TTL, show_spinner=False)
+def load_history(_engine, hours):
+    return pd.read_sql(HISTORY_SQL, _engine, params={"hours": hours})
+
+
+@st.cache_data(ttl=CACHE_TTL, show_spinner=False)
+def load_polls(_engine):
+    return pd.read_sql(POLLS_SQL, _engine)
+
+
+def to_float(frame, columns):
+    """NUMERIC arrives from psycopg2 as Decimal, which pandas holds as object.
+
+    Arithmetic works on Decimal but .mean() and every chart does not, so cast
+    at the point of calculation. Storage stays exact; only the display is float.
+    """
+    out = frame.copy()
+    for column in columns:
+        if column in out:
+            out[column] = pd.to_numeric(out[column], errors="coerce")
+    return out
+
+
+def index_to_100(pivot):
+    """Rebase every series to 100 at its first observation.
+
+    The symbols sit at very different prices, so plotting raw values squashes
+    the cheaper ones flat. Indexing makes the shapes comparable.
+    """
+    first = pivot.apply(lambda s: s.dropna().iloc[0] if s.notna().any() else pd.NA)
+    return pivot.divide(first, axis=1) * 100
+
+
+def render_market_banner(polls):
+    if polls.empty:
+        st.info("No polls recorded yet.")
+        return
+
+    poll = polls.iloc[0]
+
+    if poll["status"] == "failed":
+        st.error(f"Last poll failed: {poll['error_message']}")
+    if poll["breaker_state"] == "tripped":
+        st.error("Circuit breaker is tripped — ingest is not calling the API.")
+
+    session = poll["session"]
+
+    if poll["market_open"]:
+        st.success(f"Market open — {session or 'regular'} session.")
+    elif session in ("pre-market", "post-market"):
+        st.info(f"Regular session closed — {session} trading is live.")
+    else:
+        st.warning(
+            "Market closed. Prices are frozen at the last trade, so no new rows "
+            "are stored and the chart will not move until it reopens."
+        )
+
+
+def render_tiles(latest):
+    columns = st.columns(len(latest))
+
+    for column, (_, row) in zip(columns, latest.iterrows()):
+        price = row["price"]
+        pct = row["pct_change"]
+        column.metric(
+            label=row["symbol"],
+            value="—" if pd.isna(price) else f"${price:,.2f}",
+            delta=None if pd.isna(pct) else f"{pct:+.2f}%",
+        )
+
+def render_polls(polls):
+    if polls.empty:
+        return
+
+    recent = polls.head(20)
+    succeeded = int((recent["status"] == "succeeded").sum())
+    throttled = pd.to_numeric(recent["throttled_seconds"], errors="coerce").sum()
+    retries = int(pd.to_numeric(recent["retries"], errors="coerce").fillna(0).sum())
+
+    with st.expander(
+        f"Ingest health — last {len(recent)} polls: {succeeded} succeeded, "
+        f"{retries} retries, {throttled:.1f}s throttled"
+    ):
+        st.caption(
+            "`throttled_seconds` is how long the token bucket held ingest back. "
+            "`breaker_state` is healthy, tripped, or testing."
+        )
+        st.dataframe(recent, use_container_width=True, hide_index=True)
 
 
 engine = get_destination_engine()
 
-st.title("Training dataset")
+st.title("Live stocks")
 st.caption(
-    "Built from the Hugging Face Datasets API by the ingest and transform containers."
+    f"Polled from the Finnhub API by the ingest container. Refreshes every {REFRESH}."
 )
 
-st.sidebar.header("Connection")
 try:
     engine.connect().close()
-    st.sidebar.success("destination_postgres — connected")
 except Exception as error:
-    st.sidebar.error(f"destination_postgres — {error}")
+    st.error(f"Cannot reach destination_postgres — {error}")
     st.stop()
 
-if not table_exists(engine, "dataset_examples"):
-    st.warning("`dataset_examples` does not exist yet — run `ingest`, then `transform`.")
+if not table_exists(engine, "raw_stock_quotes"):
+    st.warning("`raw_stock_quotes` does not exist yet — start the `ingest` service.")
     st.stop()
 
-examples = load(engine, "destination", "dataset_examples")
 
-# --- headline numbers -------------------------------------------------------
-counts = examples["split"].value_counts()
-
-col1, col2, col3, col4, col5 = st.columns(5)
-col1.metric("Examples", f"{len(examples):,}")
-col2.metric("Train", f"{counts.get('train', 0):,}")
-col3.metric("Validation", f"{counts.get('validation', 0):,}")
-col4.metric("Test", f"{counts.get('test', 0):,}")
-col5.metric("Classes", int(examples["label_name"].nunique()))
-
-if table_exists(engine, "dataset_version"):
-    version = load(engine, "destination", "dataset_version")
-    if not version.empty:
-        row = version.iloc[0]
-        st.caption(
-            f"version `{row['version_id']}` · {row['dataset']} / {row['source_split']} · "
-            f"{row['n_raw_rows']:,} raw rows in · built {row['built_at']}"
-        )
-
-tab_balance, tab_browse, tab_raw = st.tabs(
-    ["Class balance", "Browse examples", "Raw + ingest runs"]
-)
-
-# --- class balance ----------------------------------------------------------
-with tab_balance:
-    st.subheader("Examples per class and split")
-    # This replaces a stored distribution table: it is a GROUP BY, so it is
-    # cheaper to compute on read than to keep in sync on write.
-    pivot = pd.crosstab(examples["label_name"], examples["split"])
-    pivot = pivot[[name for name in SPLIT_ORDER if name in pivot.columns]]
-    st.bar_chart(pivot)
-    st.dataframe(pivot, use_container_width=True)
-
-    st.subheader("Text length (words)")
-    buckets = pd.cut(examples["word_count"], bins=20)
-    histogram = examples.groupby(buckets, observed=True).size()
-    histogram.index = [f"{int(b.left)}-{int(b.right)}" for b in histogram.index]
-    st.bar_chart(histogram)
-
-# --- browse -----------------------------------------------------------------
-with tab_browse:
-    left, right = st.columns(2)
-    split_choice = left.selectbox(
-        "Split", ["all", *[s for s in SPLIT_ORDER if s in set(examples["split"])]]
+# Only this block re-runs on the timer, so the rest of the page does not flicker.
+@st.fragment(run_every=REFRESH)
+def live():
+    latest = to_float(
+        load_latest(engine),
+        [
+            "price",
+            "day_open",
+            "day_high",
+            "day_low",
+            "previous_close",
+            "change",
+            "pct_change",
+        ],
     )
-    label_choice = right.selectbox(
-        "Class", ["all", *sorted(examples["label_name"].dropna().unique())]
-    )
+    polls = load_polls(engine) if table_exists(engine, "poll_runs") else pd.DataFrame()
 
-    view = examples
-    if split_choice != "all":
-        view = view[view["split"] == split_choice]
-    if label_choice != "all":
-        view = view[view["label_name"] == label_choice]
+    render_market_banner(polls)
 
-    st.caption(f"{len(view):,} examples — showing the first 200")
-    st.dataframe(
-        view[["text_clean", "label_name", "split", "word_count"]].head(200),
-        use_container_width=True,
-        hide_index=True,
-    )
+    if latest.empty:
+        st.info("No quotes stored yet. The first poll takes a few seconds.")
+        return
 
-# --- raw --------------------------------------------------------------------
-with tab_raw:
-    for table_name in ("ingestion_runs", "raw_dataset_rows"):
-        if not table_exists(engine, table_name):
-            st.info(f"`{table_name}` does not exist yet.")
-            continue
-        frame = load(engine, "destination", table_name)
-        with st.expander(f"{table_name} — {len(frame):,} rows"):
-            st.dataframe(frame.head(200), use_container_width=True, hide_index=True)
+    render_tiles(latest)
+
+    with st.expander("Latest quote detail"):
+        st.dataframe(latest, use_container_width=True, hide_index=True)
+
+    render_polls(polls)
+
+
+live()
