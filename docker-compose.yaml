@@ -18,9 +18,9 @@ services:
       retries: 20
       start_period: 5s
 
-  ingest:
+  stream:
     build:
-      context: ./ingest
+      context: ./stream
       dockerfile: Dockerfile
     restart: unless-stopped
     env_file:

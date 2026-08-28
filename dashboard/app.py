@@ -6,75 +6,124 @@ from sqlalchemy import text
 
 from db import get_destination_engine, table_exists
 
-st.set_page_config(page_title="Live stocks", page_icon="📈", layout="wide")
+st.set_page_config(page_title="Live trades", page_icon="📈", layout="wide")
 
+REFRESH = "1s"
 HISTORY_HOURS = int(os.environ.get("HISTORY_HOURS", "24"))
-REFRESH = "15s"
-CACHE_TTL = 10
+LIVE_WINDOW_SECONDS = int(os.environ.get("LIVE_WINDOW_SECONDS", "300"))
+STALE_AFTER_SECONDS = float(os.environ.get("STALE_AFTER_SECONDS", "90"))
+HISTORY_CACHE_TTL = 30
 
-# One row per symbol: the newest quote we hold. DISTINCT ON is the Postgres
-# shortcut for "first row of each group" and rides the (symbol, quote_ts)
-# primary key, so it stays fast as the table grows.
+# The trade feed gives us a price and nothing else, so open/high/low are
+# derived from the trades we stored rather than handed over by the API.
+# now() is UTC in the container, and the whole US session lives inside one
+# UTC day, so date_trunc('day') is a safe boundary here.
 LATEST_SQL = text(
     """
-    SELECT DISTINCT ON (symbol)
-          symbol, quote_ts, price, day_open, day_high, day_low,
-          previous_close, change, pct_change
-      FROM raw_stock_quotes
-      ORDER BY symbol, quote_ts DESC
+    WITH today AS (
+        SELECT symbol, trade_ts, price
+          FROM raw_trades
+         WHERE trade_ts >= date_trunc('day', now())
+    ),
+    stats AS (
+        SELECT symbol, min(price) AS day_low, max(price) AS day_high,
+               count(*) AS trades_today
+          FROM today
+         GROUP BY symbol
+    ),
+    opens AS (
+        SELECT DISTINCT ON (symbol) symbol, price AS day_open
+          FROM today
+         ORDER BY symbol, trade_ts
+    ),
+    latest AS (
+        SELECT DISTINCT ON (symbol) symbol, trade_ts, price, volume
+          FROM raw_trades
+         ORDER BY symbol, trade_ts DESC
+    )
+    SELECT latest.symbol, latest.trade_ts, latest.price, latest.volume,
+           opens.day_open, stats.day_high, stats.day_low, stats.trades_today
+      FROM latest
+      LEFT JOIN opens ON opens.symbol = latest.symbol
+      LEFT JOIN stats ON stats.symbol = latest.symbol
+     ORDER BY latest.symbol
     """
 )
 
-# Downsample to one point per minute. 15-second polling over 24 hours is
-# 5,760 rows per symbol; a browser cannot draw that, and it carries no more
-# information than the per-minute closes.
+# One point per second. This is the whole reason for the websocket - polling
+# every 15 seconds could never draw this.
+LIVE_SQL = text(
+    """
+    SELECT DISTINCT ON (symbol, date_trunc('second', trade_ts))
+           symbol,
+           date_trunc('second', trade_ts) AS at,
+           price
+      FROM raw_trades
+     WHERE trade_ts >= now() - make_interval(secs => :seconds)
+     ORDER BY symbol, date_trunc('second', trade_ts), trade_ts DESC
+    """
+)
+
+# Per-minute closes. A browser cannot draw millions of ticks, and the shape
+# is identical.
 HISTORY_SQL = text(
     """
-    SELECT DISTINCT ON (symbol, date_trunc('minute', quote_ts))
-          symbol,
-          date_trunc('minute', quote_ts) AS minute,
-          price
-      FROM raw_stock_quotes
-    WHERE quote_ts >= now() - make_interval(hours => :hours)
-    ORDER BY symbol, date_trunc('minute', quote_ts), quote_ts DESC
+    SELECT DISTINCT ON (symbol, date_trunc('minute', trade_ts))
+           symbol,
+           date_trunc('minute', trade_ts) AS at,
+           price
+      FROM raw_trades
+     WHERE trade_ts >= now() - make_interval(hours => :hours)
+     ORDER BY symbol, date_trunc('minute', trade_ts), trade_ts DESC
     """
 )
 
-POLLS_SQL = text(
+SESSIONS_SQL = text(
     """
-    SELECT poll_id, started_at, finished_at, market_open, session,
-          requests_made, rows_inserted, throttled_seconds, retries,
-          breaker_state, status, error_message
-      FROM poll_runs
-    ORDER BY poll_id DESC
-    LIMIT 50
+    SELECT session_id, connected_at, disconnected_at, symbols,
+           trades_received, rows_written, last_message_at, last_trade_at,
+           reconnects, market_open, market_session, status, error_message
+      FROM stream_sessions
+     ORDER BY session_id DESC
+     LIMIT 20
+    """
+)
+
+# reltuples is an autovacuum estimate, so it is instant even on a huge table.
+# count(*) would scan every row on every refresh.
+STORAGE_SQL = text(
+    """
+    SELECT pg_size_pretty(pg_total_relation_size('raw_trades')) AS on_disk,
+           (SELECT reltuples::bigint FROM pg_class WHERE relname = 'raw_trades')
+               AS approx_rows
     """
 )
 
 
-# Streamlit re-runs the script on every interaction, so queries are cached.
-# The leading underscore keeps the unhashable engine out of the cache key.
-@st.cache_data(ttl=CACHE_TTL, show_spinner=False)
-def load_latest(_engine):
-    return pd.read_sql(LATEST_SQL, _engine)
+def load_latest(engine):
+    return pd.read_sql(LATEST_SQL, engine)
 
 
-@st.cache_data(ttl=CACHE_TTL, show_spinner=False)
+def load_live(engine):
+    return pd.read_sql(LIVE_SQL, engine, params={"seconds": LIVE_WINDOW_SECONDS})
+
+
+def load_sessions(engine):
+    return pd.read_sql(SESSIONS_SQL, engine)
+
+
+def load_storage(engine):
+    return pd.read_sql(STORAGE_SQL, engine)
+
+
+# Only the long chart is cached. The live panels must not serve stale rows.
+@st.cache_data(ttl=HISTORY_CACHE_TTL, show_spinner=False)
 def load_history(_engine, hours):
     return pd.read_sql(HISTORY_SQL, _engine, params={"hours": hours})
 
 
-@st.cache_data(ttl=CACHE_TTL, show_spinner=False)
-def load_polls(_engine):
-    return pd.read_sql(POLLS_SQL, _engine)
-
-
 def to_float(frame, columns):
-    """NUMERIC arrives from psycopg2 as Decimal, which pandas holds as object.
-
-    Arithmetic works on Decimal but .mean() and every chart does not, so cast
-    at the point of calculation. Storage stays exact; only the display is float.
-    """
+    """NUMERIC arrives as Decimal, which charts and .mean() cannot handle."""
     out = frame.copy()
     for column in columns:
         if column in out:
@@ -83,37 +132,67 @@ def to_float(frame, columns):
 
 
 def index_to_100(pivot):
-    """Rebase every series to 100 at its first observation.
-
-    The symbols sit at very different prices, so plotting raw values squashes
-    the cheaper ones flat. Indexing makes the shapes comparable.
-    """
+    """Rebase each series to 100 so symbols at different prices stay comparable."""
     first = pivot.apply(lambda s: s.dropna().iloc[0] if s.notna().any() else pd.NA)
     return pivot.divide(first, axis=1) * 100
 
 
-def render_market_banner(polls):
-    if polls.empty:
-        st.info("No polls recorded yet.")
+def seconds_since(value):
+    if value is None or pd.isna(value):
+        return None
+    return (pd.Timestamp.now(tz="UTC") - pd.Timestamp(value)).total_seconds()
+
+
+def format_age(seconds):
+    if seconds is None:
+        return "never"
+    if seconds < 60:
+        return f"{seconds:.0f}s ago"
+    if seconds < 3600:
+        return f"{seconds / 60:.0f}m ago"
+    return f"{seconds / 3600:.1f}h ago"
+
+
+def render_banner(session):
+    """Separates 'quiet market' from 'dead socket' - the point of the heartbeat."""
+    if session is None:
+        st.info("No stream session recorded yet. Start the `stream` service.")
         return
 
-    poll = polls.iloc[0]
+    if session["status"] == "failed" and session["error_message"]:
+        st.error(f"Stream failed: {session['error_message']}")
 
-    if poll["status"] == "failed":
-        st.error(f"Last poll failed: {poll['error_message']}")
-    if poll["breaker_state"] == "tripped":
-        st.error("Circuit breaker is tripped — ingest is not calling the API.")
+    message_age = seconds_since(session["last_message_at"])
+    trade_age = seconds_since(session["last_trade_at"])
 
-    session = poll["session"]
+    if message_age is None:
+        st.warning("Socket opened, but Finnhub has not sent anything yet.")
+        return
 
-    if poll["market_open"]:
-        st.success(f"Market open — {session or 'regular'} session.")
-    elif session in ("pre-market", "post-market"):
-        st.info(f"Regular session closed — {session} trading is live.")
+    if message_age > STALE_AFTER_SECONDS:
+        st.error(
+            f"Socket looks stale - last message {format_age(message_age)}. "
+            "Check the `stream` container logs."
+        )
+        return
+
+    market = session["market_session"]
+
+    if session["market_open"]:
+        st.success(
+            f"Live - market open ({market or 'regular'}). "
+            f"Last trade {format_age(trade_age)}."
+        )
+    elif market in ("pre-market", "post-market"):
+        st.info(
+            f"Live - regular session closed, {market} trading. "
+            f"Last trade {format_age(trade_age)}."
+        )
     else:
         st.warning(
-            "Market closed. Prices are frozen at the last trade, so no new rows "
-            "are stored and the chart will not move until it reopens."
+            f"Connected and healthy, but the market is closed. "
+            f"Last message {format_age(message_age)}, "
+            f"last trade {format_age(trade_age)}. The charts will not move."
         )
 
 
@@ -122,80 +201,99 @@ def render_tiles(latest):
 
     for column, (_, row) in zip(columns, latest.iterrows()):
         price = row["price"]
-        pct = row["pct_change"]
+        day_open = row["day_open"]
+
+        delta = None
+        if not pd.isna(price) and not pd.isna(day_open) and day_open:
+            delta = f"{(price / day_open - 1) * 100:+.2f}%"
+
         column.metric(
             label=row["symbol"],
-            value="—" if pd.isna(price) else f"${price:,.2f}",
-            delta=None if pd.isna(pct) else f"{pct:+.2f}%",
+            value="-" if pd.isna(price) else f"${price:,.2f}",
+            delta=delta,
         )
 
-def render_polls(polls):
-    if polls.empty:
+
+def render_chart(frame, title, caption):
+    st.subheader(title)
+    st.caption(caption)
+
+    if frame.empty:
+        st.info("No trades stored for this window yet.")
         return
 
-    recent = polls.head(20)
-    succeeded = int((recent["status"] == "succeeded").sum())
-    throttled = pd.to_numeric(recent["throttled_seconds"], errors="coerce").sum()
-    retries = int(pd.to_numeric(recent["retries"], errors="coerce").fillna(0).sum())
+    pivot = to_float(frame, ["price"]).pivot(
+        index="at", columns="symbol", values="price"
+    )
+    st.line_chart(index_to_100(pivot.sort_index()))
+
+
+def render_health(sessions, storage):
+    if sessions.empty:
+        return
+
+    current = sessions.iloc[0]
+    received = int(current["trades_received"] or 0)
+    written = int(current["rows_written"] or 0)
+    on_disk = storage.iloc[0]["on_disk"] if not storage.empty else "unknown"
 
     with st.expander(
-        f"Ingest health — last {len(recent)} polls: {succeeded} succeeded, "
-        f"{retries} retries, {throttled:.1f}s throttled"
+        f"Stream health - {len(sessions)} sessions, "
+        f"{received:,} trades received, {written:,} rows written, {on_disk} on disk"
     ):
         st.caption(
-            "`throttled_seconds` is how long the token bucket held ingest back. "
-            "`breaker_state` is healthy, tripped, or testing."
+            "`trades_received` counts what came off the socket, `rows_written` "
+            "what reached Postgres. A widening gap means the writer is behind. "
+            "`reconnects` is how many times the socket had to come back."
         )
-        st.dataframe(recent, use_container_width=True, hide_index=True)
+        st.dataframe(sessions, use_container_width=True, hide_index=True)
 
 
 engine = get_destination_engine()
 
-st.title("Live stocks")
+st.title("Live trades")
 st.caption(
-    f"Polled from the Finnhub API by the ingest container. Refreshes every {REFRESH}."
+    "Streamed from the Finnhub websocket by the `stream` container. "
+    f"This page refreshes every {REFRESH}."
 )
 
 try:
     engine.connect().close()
 except Exception as error:
-    st.error(f"Cannot reach destination_postgres — {error}")
+    st.error(f"Cannot reach destination_postgres - {error}")
     st.stop()
 
-if not table_exists(engine, "raw_stock_quotes"):
-    st.warning("`raw_stock_quotes` does not exist yet — start the `ingest` service.")
+if not table_exists(engine, "raw_trades"):
+    st.warning("`raw_trades` does not exist yet - start the `stream` service.")
     st.stop()
 
 
-# Only this block re-runs on the timer, so the rest of the page does not flicker.
+# Only this block re-runs on the timer, so the page does not flicker.
 @st.fragment(run_every=REFRESH)
 def live():
+    sessions = (
+        load_sessions(engine)
+        if table_exists(engine, "stream_sessions")
+        else pd.DataFrame()
+    )
+    render_banner(None if sessions.empty else sessions.iloc[0])
+
     latest = to_float(
         load_latest(engine),
-        [
-            "price",
-            "day_open",
-            "day_high",
-            "day_low",
-            "previous_close",
-            "change",
-            "pct_change",
-        ],
+        ["price", "volume", "day_open", "day_high", "day_low"],
     )
-    polls = load_polls(engine) if table_exists(engine, "poll_runs") else pd.DataFrame()
-
-    render_market_banner(polls)
 
     if latest.empty:
-        st.info("No quotes stored yet. The first poll takes a few seconds.")
+        st.info("No trades stored yet. Nothing arrives while the market is closed.")
+        render_health(sessions, load_storage(engine))
         return
 
     render_tiles(latest)
 
-    with st.expander("Latest quote detail"):
+    with st.expander("Latest trade detail"):
         st.dataframe(latest, use_container_width=True, hide_index=True)
 
-    render_polls(polls)
+    render_health(sessions, load_storage(engine))
 
 
 live()
