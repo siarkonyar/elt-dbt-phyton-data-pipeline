@@ -1,0 +1,21 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: needs a real Postgres; skipped when none is reachable",
+]
+
+[tool.coverage.run]
+source = ["stream"]
+omit = [
+    "stream/main.py",   # an infinite loop; covering it proves little
+]
+
+[tool.coverage.report]
+show_missing = true
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
