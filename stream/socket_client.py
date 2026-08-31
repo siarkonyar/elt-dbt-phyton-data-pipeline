@@ -17,6 +17,19 @@ class Trade:
     volume: float
     conditions: str
 
+def parse_trade(item):
+    """One Finnhub trade object -> Trade, or None if it is unusable."""
+    try:
+        return Trade(
+            symbol=item["s"],
+            trade_ts=datetime.fromtimestamp(item["t"] / 1000, tz=timezone.utc),
+            price=float(item["p"]),
+            volume=float(item.get("v") or 0),
+            conditions=",".join(str(code) for code in item.get("c") or ()),
+        )
+    except (KeyError, TypeError, ValueError, OSError, OverflowError):
+        return None
+
 def parse_message(raw):
     """Finnhub JSON -> (message type, tuple of Trades). Never raises."""
     try:
@@ -24,22 +37,18 @@ def parse_message(raw):
     except (TypeError, ValueError):
         return ERROR, ()
 
+    # Valid JSON is not necessarily an object. "[1,2,3]" parses fine and
+    # then has no .get, which used to kill the socket thread.
+    if not isinstance(message, dict):
+        return ERROR, ()
+
     message_type = message.get("type")
 
     if message_type != TRADE:
         return message_type, ()
 
-    return TRADE, tuple(
-        Trade(
-            symbol=item["s"],
-            trade_ts=datetime.fromtimestamp(item["t"] / 1000, tz=timezone.utc),
-            price=float(item["p"]),
-            volume=float(item.get("v") or 0),
-            conditions=",".join(str(code) for code in item.get("c") or ()),
-        )
-        for item in message.get("data") or ()
-    )
-
+    parsed = (parse_trade(item) for item in message.get("data") or ())
+    return TRADE, tuple(trade for trade in parsed if trade is not None)
 class FinnhubSocket:
     """Owns one connection. Parses messages onto a queue and nothing else."""
 
