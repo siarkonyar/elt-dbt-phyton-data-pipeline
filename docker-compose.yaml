@@ -36,6 +36,21 @@ services:
       destination_postgres:
         condition: service_healthy
 
+  rollup:
+    build:
+      context: ./rollup
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ./.env
+    environment:
+      DESTINATION_POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    networks:
+      - elt_network
+    depends_on:
+      destination_postgres:
+        condition: service_healthy
+
   dashboard:
     build:
       context: ./dashboard
