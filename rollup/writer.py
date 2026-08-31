@@ -2,7 +2,7 @@ from sqlalchemy import text
 
 UPSERT_CANDLES_SQL = text(
     """
-    INSERT INTO trades_1m
+    INSERT INTO candles
         (symbol, minute, open, high, low, close, volume, trade_count, updated_at)
     VALUES
         (:symbol, :minute, :open, :high, :low, :close, :volume, :trade_count, now())

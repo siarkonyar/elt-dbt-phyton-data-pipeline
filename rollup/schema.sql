@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS candels (
+CREATE TABLE IF NOT EXISTS candles (
     symbol      TEXT        NOT NULL,
     minute      TIMESTAMPTZ NOT NULL,
     open        NUMERIC     NOT NULL,
@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS candels (
 
 -- The dashboard asks for "every symbol, last N hours". The primary key leads
 -- with symbol, so it cannot serve a range scan on minute alone.
-CREATE INDEX IF NOT EXISTS candels_idx ON candels (minute DESC);
+CREATE INDEX IF NOT EXISTS candles_idx ON candles (minute DESC);
 
 CREATE TABLE IF NOT EXISTS rollup_runs (
     run_id          BIGSERIAL   PRIMARY KEY,

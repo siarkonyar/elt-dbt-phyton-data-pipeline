@@ -1,6 +1,7 @@
 import os
 import sys
 from pathlib import Path
+import importlib.util
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -14,7 +15,8 @@ ROOT = Path(__file__).resolve().parent.parent
 #
 # Putting stream/ on sys.path lets the tests import those modules under the
 # exact same names the container uses, so we test the real import shape.
-sys.path.insert(0, str(ROOT / "stream"))
+sys.path.insert(0, str(ROOT / "rollup"))
+sys.path.insert(0, str(ROOT / "stream"))   # inserted last, so searched first
 
 import db  # noqa: E402  - stream/db.py, importable only after the line above
 
@@ -91,4 +93,43 @@ def connection(engine):
 def stream_db(connection):
     """A connection with the stream service's tables already created."""
     db.apply_schema(connection)
+    return connection
+
+def _load_service_module(service, module_name):
+    """Load rollup/<name>.py explicitly, bypassing the sys.path shadowing.
+
+    Both services call their settings module `config`, because inside each
+    container it is alone at /app. In one test process only one of them can
+    own the bare name, so the other is loaded by file path instead.
+    """
+    full_name = f"{service}_{module_name}"
+    if full_name in sys.modules:
+        return sys.modules[full_name]
+
+    spec = importlib.util.spec_from_file_location(
+        full_name, ROOT / service / f"{module_name}.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[full_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture(scope="session")
+def rollup_config():
+    return _load_service_module("rollup", "config")
+
+
+@pytest.fixture(scope="session")
+def rollup_writer():
+    return _load_service_module("rollup", "writer")
+
+
+@pytest.fixture(scope="session")
+def rollup_db():
+    return _load_service_module("rollup", "db")
+
+@pytest.fixture
+def rollup_tables(connection, rollup_db):
+    rollup_db.apply_schema(connection)
     return connection
