@@ -9,10 +9,11 @@ from db import get_destination_engine, table_exists
 st.set_page_config(page_title="Live trades", page_icon="📈", layout="wide")
 
 REFRESH = "1s"
+CANDLE_REFRESH = "30s"
 HISTORY_HOURS = int(os.environ.get("HISTORY_HOURS", "24"))
-LIVE_WINDOW_SECONDS = int(os.environ.get("LIVE_WINDOW_SECONDS", "300"))
 STALE_AFTER_SECONDS = float(os.environ.get("STALE_AFTER_SECONDS", "90"))
 HISTORY_CACHE_TTL = 30
+CANDLE_LAG_GRACE_SECONDS = 300
 
 # The trade feed gives us a price and nothing else, so open/high/low are
 # derived from the trades we stored rather than handed over by the API.
@@ -50,31 +51,15 @@ LATEST_SQL = text(
     """
 )
 
-# One point per second. This is the whole reason for the websocket - polling
-# every 15 seconds could never draw this.
-LIVE_SQL = text(
+# Per-minute closes, straight off the rollup. Deriving these from raw ticks
+# meant a DISTINCT ON over every trade in the window; this is an index range
+# scan over one row per symbol per minute.
+CANDLES_SQL = text(
     """
-    SELECT DISTINCT ON (symbol, date_trunc('second', trade_ts))
-           symbol,
-           date_trunc('second', trade_ts) AS at,
-           price
-      FROM raw_trades
-     WHERE trade_ts >= now() - make_interval(secs => :seconds)
-     ORDER BY symbol, date_trunc('second', trade_ts), trade_ts DESC
-    """
-)
-
-# Per-minute closes. A browser cannot draw millions of ticks, and the shape
-# is identical.
-HISTORY_SQL = text(
-    """
-    SELECT DISTINCT ON (symbol, date_trunc('minute', trade_ts))
-           symbol,
-           date_trunc('minute', trade_ts) AS at,
-           price
-      FROM raw_trades
-     WHERE trade_ts >= now() - make_interval(hours => :hours)
-     ORDER BY symbol, date_trunc('minute', trade_ts), trade_ts DESC
+    SELECT symbol, minute AS at, close AS price
+      FROM candles
+     WHERE minute >= now() - make_interval(hours => :hours)
+     ORDER BY symbol, minute
     """
 )
 
@@ -89,6 +74,16 @@ SESSIONS_SQL = text(
     """
 )
 
+ROLLUP_RUNS_SQL = text(
+    """
+    SELECT run_id, started_at, finished_at, window_start, window_end,
+           trades_read, minutes_written, status, error_message
+      FROM rollup_runs
+     ORDER BY run_id DESC
+     LIMIT 20
+    """
+)
+
 # reltuples is an autovacuum estimate, so it is instant even on a huge table.
 # count(*) would scan every row on every refresh.
 STORAGE_SQL = text(
@@ -99,13 +94,19 @@ STORAGE_SQL = text(
     """
 )
 
+# max(minute) rides the candles_idx index and reltuples is an estimate, so
+# neither of these gets slower as the table grows.
+CANDLE_STATUS_SQL = text(
+    """
+    SELECT (SELECT max(minute) FROM candles) AS newest_minute,
+           (SELECT reltuples::bigint FROM pg_class WHERE relname = 'candles')
+               AS approx_candles
+    """
+)
+
 
 def load_latest(engine):
     return pd.read_sql(LATEST_SQL, engine)
-
-
-def load_live(engine):
-    return pd.read_sql(LIVE_SQL, engine, params={"seconds": LIVE_WINDOW_SECONDS})
 
 
 def load_sessions(engine):
@@ -116,10 +117,19 @@ def load_storage(engine):
     return pd.read_sql(STORAGE_SQL, engine)
 
 
-# Only the long chart is cached. The live panels must not serve stale rows.
+def load_rollup_runs(engine):
+    return pd.read_sql(ROLLUP_RUNS_SQL, engine)
+
+
+def load_candle_status(engine):
+    return pd.read_sql(CANDLE_STATUS_SQL, engine)
+
+
+# The only query on the page that reads more than a handful of rows, and the
+# only one that is cached. The live panels must not serve stale rows.
 @st.cache_data(ttl=HISTORY_CACHE_TTL, show_spinner=False)
-def load_history(_engine, hours):
-    return pd.read_sql(HISTORY_SQL, _engine, params={"hours": hours})
+def load_candles(_engine, hours):
+    return pd.read_sql(CANDLES_SQL, _engine, params={"hours": hours})
 
 
 def to_float(frame, columns):
@@ -199,7 +209,7 @@ def render_banner(session):
 def render_tiles(latest):
     columns = st.columns(len(latest))
 
-    for column, (_, row) in zip(columns, latest.iterrows()):
+    for column, (_, row) in zip(columns, latest.iterrows(), strict=True):
         price = row["price"]
         day_open = row["day_open"]
 
@@ -214,12 +224,15 @@ def render_tiles(latest):
         )
 
 
-def render_chart(frame, title, caption):
-    st.subheader(title)
-    st.caption(caption)
+def render_candle_chart(frame):
+    st.subheader("Price history")
+    st.caption(
+        f"Per-minute closes from the `candles` table, last {HISTORY_HOURS}h. "
+        "Rebased to 100 so symbols at different prices stay comparable."
+    )
 
     if frame.empty:
-        st.info("No trades stored for this window yet.")
+        st.info("No candles yet - the `rollup` service builds them once a minute.")
         return
 
     pivot = to_float(frame, ["price"]).pivot(
@@ -249,12 +262,54 @@ def render_health(sessions, storage):
         st.dataframe(sessions, use_container_width=True, hide_index=True)
 
 
+def render_rollup_health(runs, status, last_trade_at):
+    if runs.empty:
+        st.info("No rollup run recorded yet. Start the `rollup` service.")
+        return
+
+    current = runs.iloc[0]
+
+    if current["status"] == "failed" and current["error_message"]:
+        st.error(f"Rollup failed: {current['error_message']}")
+
+    newest = None if status.empty else status.iloc[0]["newest_minute"]
+    approx = 0 if status.empty else (status.iloc[0]["approx_candles"] or 0)
+
+    candle_age = seconds_since(newest)
+    trade_age = seconds_since(last_trade_at)
+
+    # Stale candles only mean a fault if trades are actually arriving.
+    # Overnight there are no new trades AND no new candles, which is correct,
+    # and an alarm that fires every night is one nobody reads.
+    trades_flowing = trade_age is not None and trade_age < CANDLE_LAG_GRACE_SECONDS
+    candles_behind = candle_age is None or candle_age > CANDLE_LAG_GRACE_SECONDS
+
+    if trades_flowing and candles_behind:
+        st.warning(
+            f"Trades are arriving ({format_age(trade_age)}) but the newest "
+            f"candle is {format_age(candle_age)}. Check the `rollup` container."
+        )
+
+    with st.expander(
+        f"Rollup health - newest candle {format_age(candle_age)}, "
+        f"~{int(approx):,} candles stored"
+    ):
+        st.caption(
+            "`trades_read` is how many raw trades the window pulled, "
+            "`minutes_written` how many candles it wrote. The same minutes get "
+            "rewritten every run on purpose - that is how late trades correct "
+            "themselves."
+        )
+        st.dataframe(runs, use_container_width=True, hide_index=True)
+
+
 engine = get_destination_engine()
 
 st.title("Live trades")
 st.caption(
-    "Streamed from the Finnhub websocket by the `stream` container. "
-    f"This page refreshes every {REFRESH}."
+    "Streamed from the Finnhub websocket by the `stream` container, "
+    f"rolled up into minute candles by `rollup`. Prices refresh every {REFRESH}, "
+    f"the chart every {CANDLE_REFRESH}."
 )
 
 try:
@@ -296,4 +351,31 @@ def live():
     render_health(sessions, load_storage(engine))
 
 
+# A separate fragment on a slower timer. The price tiles want 1s; redrawing a
+# 24-hour chart that only changes once a minute at that rate is pure waste,
+# and it visibly flickers.
+@st.fragment(run_every=CANDLE_REFRESH)
+def history():
+    if not table_exists(engine, "candles"):
+        st.info("`candles` does not exist yet - start the `rollup` service.")
+        return
+
+    render_candle_chart(load_candles(engine, HISTORY_HOURS))
+
+    sessions = (
+        load_sessions(engine)
+        if table_exists(engine, "stream_sessions")
+        else pd.DataFrame()
+    )
+    last_trade_at = None if sessions.empty else sessions.iloc[0]["last_trade_at"]
+
+    runs = (
+        load_rollup_runs(engine)
+        if table_exists(engine, "rollup_runs")
+        else pd.DataFrame()
+    )
+    render_rollup_health(runs, load_candle_status(engine), last_trade_at)
+
+
 live()
+history()
