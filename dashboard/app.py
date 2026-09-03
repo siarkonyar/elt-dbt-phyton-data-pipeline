@@ -1,6 +1,7 @@
 import os
 
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 from sqlalchemy import text
 
@@ -14,6 +15,13 @@ HISTORY_HOURS = int(os.environ.get("HISTORY_HOURS", "24"))
 STALE_AFTER_SECONDS = float(os.environ.get("STALE_AFTER_SECONDS", "90"))
 HISTORY_CACHE_TTL = 30
 CANDLE_LAG_GRACE_SECONDS = 300
+
+# Green when close >= open, red when it fell. The rollup writes one row per
+# minute, so one candle is one minute.
+CANDLE_UP_COLOR = "#26a69a"
+CANDLE_DOWN_COLOR = "#ef5350"
+CANDLE_CHART_HEIGHT = 320
+MINUTE_MILLISECONDS = 60_000
 
 # The trade feed gives us a price and nothing else, so open/high/low are
 # derived from the trades we stored rather than handed over by the API.
@@ -51,12 +59,13 @@ LATEST_SQL = text(
     """
 )
 
-# Per-minute closes, straight off the rollup. Deriving these from raw ticks
+# Full OHLC per minute, straight off the rollup. Deriving these from raw ticks
 # meant a DISTINCT ON over every trade in the window; this is an index range
-# scan over one row per symbol per minute.
+# scan over one row per symbol per minute. A candle needs all four prices -
+# selecting close alone can only ever draw a line.
 CANDLES_SQL = text(
     """
-    SELECT symbol, minute AS at, close AS price
+    SELECT symbol, minute AS at, open, high, low, close
       FROM candles
      WHERE minute >= now() - make_interval(hours => :hours)
      ORDER BY symbol, minute
@@ -141,12 +150,6 @@ def to_float(frame, columns):
     return out
 
 
-def index_to_100(pivot):
-    """Rebase each series to 100 so symbols at different prices stay comparable."""
-    first = pivot.apply(lambda s: s.dropna().iloc[0] if s.notna().any() else pd.NA)
-    return pivot.divide(first, axis=1) * 100
-
-
 def seconds_since(value):
     if value is None or pd.isna(value):
         return None
@@ -224,21 +227,77 @@ def render_tiles(latest):
         )
 
 
+def missing_minutes(times):
+    """Minutes in the window that have no candle - closed market, or a gap.
+
+    Plotly draws a date axis to scale. Left alone, the overnight gap eats most
+    of a 24h chart and squashes the real candles into a sliver, so these get
+    cut out of the axis instead.
+    """
+    present = pd.DatetimeIndex(times)
+    whole_window = pd.date_range(present.min(), present.max(), freq="1min")
+    return whole_window.difference(present)
+
+
+def build_candle_figure(symbol, candles):
+    """One candle per minute: body spans open to close, wick spans low to high."""
+    figure = go.Figure(
+        go.Candlestick(
+            x=candles["at"],
+            open=candles["open"],
+            high=candles["high"],
+            low=candles["low"],
+            close=candles["close"],
+            name=symbol,
+            increasing_line_color=CANDLE_UP_COLOR,
+            decreasing_line_color=CANDLE_DOWN_COLOR,
+        )
+    )
+    figure.update_xaxes(
+        rangebreaks=[
+            {
+                "values": missing_minutes(candles["at"]),
+                "dvalue": MINUTE_MILLISECONDS,
+            }
+        ],
+        # The slider is a second copy of the chart under the chart. With one
+        # figure per symbol that is a lot of vertical space for little gain.
+        rangeslider_visible=False,
+    )
+    figure.update_yaxes(title_text=None, tickprefix="$")
+    figure.update_layout(
+        title=symbol,
+        height=CANDLE_CHART_HEIGHT,
+        margin={"l": 0, "r": 0, "t": 40, "b": 0},
+        showlegend=False,
+    )
+    return figure
+
+
 def render_candle_chart(frame):
     st.subheader("Price history")
     st.caption(
-        f"Per-minute closes from the `candles` table, last {HISTORY_HOURS}h. "
-        "Rebased to 100 so symbols at different prices stay comparable."
+        f"Per-minute candles from the `candles` table, last {HISTORY_HOURS}h. "
+        "Each candle is one minute - the body runs open to close, the thin "
+        "wick runs low to high. Green closed up, red closed down. Minutes with "
+        "no trades are cut out of the axis."
     )
 
     if frame.empty:
         st.info("No candles yet - the `rollup` service builds them once a minute.")
         return
 
-    pivot = to_float(frame, ["price"]).pivot(
-        index="at", columns="symbol", values="price"
-    )
-    st.line_chart(index_to_100(pivot.sort_index()))
+    candles = to_float(frame, ["open", "high", "low", "close"])
+
+    # One figure per symbol. Candles sit at real prices, so several symbols on
+    # shared axes would overlap into mush.
+    for symbol in sorted(candles["symbol"].unique()):
+        for_symbol = candles[candles["symbol"] == symbol].sort_values("at")
+        st.plotly_chart(
+            build_candle_figure(symbol, for_symbol),
+            use_container_width=True,
+            key=f"candles-{symbol}",
+        )
 
 
 def render_health(sessions, storage):
