@@ -1,7 +1,8 @@
 from datetime import datetime, timedelta, timezone
 
-from socket_client import Trade
 from sqlalchemy import text
+
+from socket_client import Trade
 from writer import finish_session, heartbeat, insert_trades, start_session
 
 BASE_TIME = datetime(2024, 1, 1, 12, 0, tzinfo=timezone.utc)

@@ -1,7 +1,7 @@
+import importlib.util
 import os
 import sys
 from pathlib import Path
-import importlib.util
 
 import pytest
 from sqlalchemy import create_engine, text

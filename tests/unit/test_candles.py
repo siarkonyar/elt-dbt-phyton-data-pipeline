@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 import pandas as pd
+
 from candles import CANDLE_COLUMNS, build_candles
 
 TRADE_COLUMNS = ["symbol", "trade_ts", "price", "volume"]

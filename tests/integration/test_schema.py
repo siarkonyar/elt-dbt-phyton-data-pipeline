@@ -1,5 +1,6 @@
-import db
 from sqlalchemy import text
+
+import db
 
 TABLES_SQL = text(
     "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename"

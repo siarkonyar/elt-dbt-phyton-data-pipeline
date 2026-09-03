@@ -1,8 +1,9 @@
 from datetime import datetime, timezone
 
 import pandas as pd
-from candles import build_candles
 from sqlalchemy import text
+
+from candles import build_candles
 
 BASE_MINUTE = pd.Timestamp("2024-01-01 12:00:00", tz="UTC")
 WINDOW_END = datetime(2024, 1, 1, 12, 10, tzinfo=timezone.utc)

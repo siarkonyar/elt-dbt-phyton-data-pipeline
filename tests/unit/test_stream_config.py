@@ -1,6 +1,7 @@
 from dataclasses import FrozenInstanceError
 
 import pytest
+
 from config import ConfigError, load_config, parse_symbols
 
 
