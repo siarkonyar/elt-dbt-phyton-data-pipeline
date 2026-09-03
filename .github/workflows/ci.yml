@@ -35,9 +35,31 @@ jobs:
       - name: Lint
         run: ruff check .
 
-  test:
-    name: pytest (unit + integration)
+  unit:
+    name: pytest (unit)
     runs-on: ubuntu-latest
+    needs: lint
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run tests
+        run: pytest -m "not integration" --cov -ra
+
+
+  integration:
+    name: pytest (integration)
+    runs-on: ubuntu-latest
+    needs: unit
 
     services:
       postgres:
@@ -83,4 +105,4 @@ jobs:
           PY
 
       - name: Run tests
-        run: pytest --cov -ra
+        run: pytest -m "integration" --cov -ra
