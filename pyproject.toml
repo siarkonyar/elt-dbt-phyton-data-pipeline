@@ -1,0 +1,26 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: needs a real Postgres; skipped when none is reachable",
+    "e2e: runs the real container images under docker compose; needs Docker",
+]
+
+[tool.coverage.run]
+source = ["stream"]
+omit = [
+    "stream/main.py",   # an infinite loop; covering it proves little
+]
+
+[tool.coverage.report]
+show_missing = true
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+# Each service runs with its own directory on sys.path, so `from db import ...`
+# means dashboard/db.py or rollup/db.py, not some package on PyPI. Without this
+# ruff calls those third-party and sorts them in with sqlalchemy.
+src = [".", "dashboard", "rollup", "stream"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]

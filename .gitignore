@@ -42,6 +42,16 @@ env/
 
 
 # ─────────────────────────────────────────────
+# Test & coverage artefacts
+# ─────────────────────────────────────────────
+# raw measurement data written by pytest --cov
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+
+# ─────────────────────────────────────────────
 # Operating system junk
 # ─────────────────────────────────────────────
 .DS_Store

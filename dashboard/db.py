@@ -1,6 +1,5 @@
 import os
 
-import pandas as pd
 from sqlalchemy import create_engine, inspect
 
 
@@ -24,10 +23,6 @@ def _build_engine(prefix, default_host, default_db):
 
 def get_destination_engine():
     return _build_engine("DESTINATION", "destination_postgres", "destination_db")
-
-
-def read_table(engine, table_name):
-    return pd.read_sql(f"SELECT * FROM {table_name}", engine)
 
 
 def table_exists(engine, table_name):
