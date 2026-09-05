@@ -2,7 +2,7 @@
 testpaths = ["tests"]
 markers = [
     "integration: needs a real Postgres; skipped when none is reachable",
-    "e2e: the whole candle pipeline, raw_trades -> candles -> dashboard query",
+    "e2e: runs the real container images under docker compose; needs Docker",
 ]
 
 [tool.coverage.run]

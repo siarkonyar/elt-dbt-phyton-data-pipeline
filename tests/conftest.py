@@ -24,18 +24,20 @@ LOCAL_TEST_DSN = "postgresql+psycopg2://postgres:{password}@localhost:5434/test_
 
 
 def pytest_collection_modifyitems(config, items):
-    """The directory decides the marker: tests/integration/ and tests/e2e/.
+    """The directory a test lives in decides its markers.
 
-    The e2e tests need the same real Postgres, so they carry the integration
-    marker too. That keeps the CI job split (-m "not integration" for unit,
-    -m "integration" for the rest) working without touching the workflow.
+    tests/integration/ needs a real Postgres, so it carries `integration` and
+    the CI job split keeps working unchanged.
+
+    tests/e2e/ deliberately does NOT get `integration`. Those tests need
+    Docker, not a database connection: the CI integration job hands them a
+    lone Postgres and no compose stack, so it must not collect them.
     """
     for item in items:
         if "integration" in item.path.parts:
             item.add_marker(pytest.mark.integration)
         if "e2e" in item.path.parts:
             item.add_marker(pytest.mark.e2e)
-            item.add_marker(pytest.mark.integration)
 
 
 def _password_from_env_file():
