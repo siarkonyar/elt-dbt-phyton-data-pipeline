@@ -24,9 +24,17 @@ LOCAL_TEST_DSN = "postgresql+psycopg2://postgres:{password}@localhost:5434/test_
 
 
 def pytest_collection_modifyitems(config, items):
-    """Anything under tests/integration/ is an integration test, automatically."""
+    """The directory decides the marker: tests/integration/ and tests/e2e/.
+
+    The e2e tests need the same real Postgres, so they carry the integration
+    marker too. That keeps the CI job split (-m "not integration" for unit,
+    -m "integration" for the rest) working without touching the workflow.
+    """
     for item in items:
         if "integration" in item.path.parts:
+            item.add_marker(pytest.mark.integration)
+        if "e2e" in item.path.parts:
+            item.add_marker(pytest.mark.e2e)
             item.add_marker(pytest.mark.integration)
 
 
@@ -133,3 +141,47 @@ def rollup_db():
 def rollup_tables(connection, rollup_db):
     rollup_db.apply_schema(connection)
     return connection
+
+ROLLUP_BARE_MODULES = ("candles", "config", "db", "writer")
+
+
+@pytest.fixture(scope="session")
+def rollup_main():
+    saved = {name: sys.modules.get(name) for name in ROLLUP_BARE_MODULES}
+    for name in ROLLUP_BARE_MODULES:
+        sys.modules[name] = _load_service_module("rollup", name)
+
+    try:
+        return _load_service_module("rollup", "main")
+    finally:
+        for name, module in saved.items():
+            if module is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = module
+
+
+@pytest.fixture(scope="session")
+def dashboard_queries():
+    """The dashboard's real SQL. Importing app.py instead would start
+    Streamlit and open a database connection."""
+    return _load_service_module("dashboard", "queries")
+
+
+TRUNCATE_SQL = text("TRUNCATE raw_trades, candles, rollup_runs RESTART IDENTITY")
+
+
+def _empty_the_tables(engine):
+    with engine.begin() as connection:
+        connection.execute(TRUNCATE_SQL)
+
+
+@pytest.fixture
+def e2e_db(engine, rollup_db):
+    with engine.begin() as connection:
+        db.apply_schema(connection)          # raw_trades, stream_sessions
+        rollup_db.apply_schema(connection)   # candles, rollup_runs
+
+    _empty_the_tables(engine) # delete everything from previous test if there are anything
+    yield engine                             # an engine, not a connection
+    _empty_the_tables(engine) #delete everything after the test finishes

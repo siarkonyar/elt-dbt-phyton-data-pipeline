@@ -2,6 +2,7 @@
 testpaths = ["tests"]
 markers = [
     "integration: needs a real Postgres; skipped when none is reachable",
+    "e2e: the whole candle pipeline, raw_trades -> candles -> dashboard query",
 ]
 
 [tool.coverage.run]
