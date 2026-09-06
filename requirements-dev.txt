@@ -7,3 +7,5 @@ SQLAlchemy==2.0.30
 psycopg2-binary==2.9.9
 requests==2.32.3
 websocket-client==1.8.0
+
+testcontainers==4.12.0
