@@ -6,7 +6,7 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["stream"]
+source = ["rollup", "stream", "api"]
 omit = [
     "stream/main.py",   # an infinite loop; covering it proves little
 ]
@@ -15,6 +15,7 @@ omit = [
 show_missing = true
 
 [tool.ruff]
+src = [".", "api", "dashboard", "rollup", "stream"]
 line-length = 88
 target-version = "py311"
 # Each service runs with its own directory on sys.path, so `from db import ...`
