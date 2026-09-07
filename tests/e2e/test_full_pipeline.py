@@ -30,7 +30,22 @@ def nvda_candle(wait_for_candle):
     """
     return wait_for_candle(SYMBOL, NVDA_TRADES)
 
-def test_nvda_candle_has_the_expected_ohlc(nvda_candle):
+
+def test_stream_container_received_the_trades(nvda_candle, e2e_engine):
+    """Summed, not '== 5 on one row': if the socket dropped and reconnected
+    the count is split over two sessions, and that must not fail the test."""
+    with e2e_engine.connect() as connection:
+        total = connection.execute(STREAM_TRADES_SQL).scalar()
+
+    assert total >= ALL_TRADES
+
+def test_rollup_container_completed_a_run(nvda_candle, e2e_engine):
+    with e2e_engine.connect() as connection:
+        ok_runs = connection.execute(ROLLUP_OK_SQL).scalar()
+
+    assert ok_runs >= 1
+
+def test_candle_has_the_expected_ohlc(nvda_candle):
     """The whole chain worked: four trades became one correct candle."""
     prices = (
         float(nvda_candle.open),
@@ -42,7 +57,7 @@ def test_nvda_candle_has_the_expected_ohlc(nvda_candle):
     assert prices == EXPECTED_OHLC
     assert nvda_candle.trade_count == NVDA_TRADES
 
-def test_a_second_symbol_also_reaches_candles(nvda_candle, e2e_engine):
+def test_second_symbol_also_produces_a_candle(nvda_candle, e2e_engine):
     """Nothing along the path is accidentally hardcoded to one symbol."""
     with e2e_engine.connect() as connection:
         count = connection.execute(
@@ -51,7 +66,7 @@ def test_a_second_symbol_also_reaches_candles(nvda_candle, e2e_engine):
 
     assert count == 1
 
-def test_the_dashboard_query_returns_the_candle(
+def test_dashboard_query_returns_the_candle(
     nvda_candle, e2e_engine, dashboard_queries
 ):
     """Runs the dashboard's own SQL against the data the pipeline produced."""
@@ -62,10 +77,19 @@ def test_the_dashboard_query_returns_the_candle(
 
     assert any(row.symbol == SYMBOL for row in rows)
 
-def test_the_stream_container_really_ran(nvda_candle, e2e_engine):
-    """Summed, not '== 5 on one row': if the socket dropped and reconnected
-    the count is split over two sessions, and that must not fail the test."""
-    with e2e_engine.connect() as connection:
-        total = connection.execute(STREAM_TRADES_SQL).scalar()
 
-    assert total >= ALL_TRADES
+def test_dashboard_image_answers_health_check(nvda_candle, compose):
+    """Proves the image starts and stays up. It does NOT prove the chart
+    drew — Streamlit renders over its own websocket, so plain HTTP can
+    never see it. Depends on nvda_candle only for the delay: by then
+    Streamlit has certainly finished starting.
+    """
+    host = compose.get_service_host("dashboard", 8501)
+    port = compose.get_service_port("dashboard", 8501)
+
+    response = requests.get(
+        f"http://{host}:{port}{DASHBOARD_HEALTH_PATH}",
+        timeout=DASHBOARD_TIMEOUT_SECONDS,
+    )
+
+    assert response.status_code == 200
