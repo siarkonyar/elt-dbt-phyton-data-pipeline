@@ -1,0 +1,48 @@
+# Layered on docker-compose.yaml, never a copy of it:
+#   docker compose -f docker-compose.yaml -f docker-compose.e2e.yaml up
+#
+# A different project name means different container, network and volume
+# names. Your dev volume elt_destination_data is untouched by a test run.
+name: elt_e2e
+
+services:
+  fake_websocket:
+    build:
+      context: ./tests/e2e/fake_websocket
+      dockerfile: Dockerfile
+    networks:
+      - elt_network
+
+  destination_postgres:
+    environment:
+      POSTGRES_PASSWORD: e2e
+    # !override REPLACES the base list. Without the tag compose CONCATENATES,
+    # so the dev stack's '5434:5432' would still be published and clash.
+    # A bare '5432' means "publish it on whatever host port happens to be
+    # free" — the test asks Docker which one it got.
+    ports: !override
+      - '5432'
+
+  stream:
+    environment:
+      # environment: beats env_file:, so these three win over .env
+      FINNHUB_WS_URL: ws://fake_websocket:8080
+      FINNHUB_BASE_URL: http://fake_websocket:8080
+      FINNHUB_API_KEY: fake
+      DESTINATION_POSTGRES_PASSWORD: e2e
+    depends_on:
+      # Merges with the base file's destination_postgres entry rather than
+      # replacing it — depends_on is a map, and maps merge.
+      fake_websocket:
+        condition: service_started
+
+  rollup:
+    environment:
+      # The default is 60s. Without this the test waits up to a minute
+      # for a single rollup pass.
+      ROLLUP_INTERVAL_SECONDS: 5
+      DESTINATION_POSTGRES_PASSWORD: e2e
+
+  dashboard:
+    ports: !override
+      - '8501'
