@@ -187,3 +187,33 @@ def e2e_db(engine, rollup_db):
     _empty_the_tables(engine) # delete everything from previous test if there are anything
     yield engine                             # an engine, not a connection
     _empty_the_tables(engine) #delete everything after the test finishes
+
+#-----------api-----------
+
+@pytest.fixture(scope="session")
+def api_serialize():
+    return _load_service_module("api", "serialize")
+
+@pytest.fixture(scope="session")
+def api_queries():
+    return _load_service_module("api", "queries")
+
+@pytest.fixture(scope="session")
+def api_db():
+    return _load_service_module("api", "db")
+
+API_BARE_MODULES = ("db", "queries", "serialize")
+
+@pytest.fixture(scope="session")
+def api_main():
+    saved = {name: sys.modules.get(name) for name in API_BARE_MODULES}
+    for name in API_BARE_MODULES:
+        sys.modules[name] = _load_service_module("api", name)
+    try:
+        return _load_service_module("api", "main")
+    finally:
+        for name, module in saved.items():
+            if module is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = module

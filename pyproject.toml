@@ -15,13 +15,12 @@ omit = [
 show_missing = true
 
 [tool.ruff]
-src = [".", "api", "dashboard", "rollup", "stream"]
 line-length = 88
 target-version = "py311"
 # Each service runs with its own directory on sys.path, so `from db import ...`
 # means dashboard/db.py or rollup/db.py, not some package on PyPI. Without this
 # ruff calls those third-party and sorts them in with sqlalchemy.
-src = [".", "dashboard", "rollup", "stream"]
+src = [".", "api", "dashboard", "rollup", "stream"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP"]
