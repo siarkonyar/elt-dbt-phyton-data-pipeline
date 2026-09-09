@@ -14,10 +14,19 @@ def make_client(api_main, rows=()):
 
     return TestClient(api_main.app)
 
+def make_recording_client(api_main):
+    calls = []
+
+    def record_readings(symbol, hours):
+        calls.append((symbol, hours))
+        return []
+
+    api_main.app.dependency_overrides[api_main.get_reader] = lambda: record_readings
+
 def test_health_returns_ok(api_main):
   client = TestClient(api_main.app)
 
-  response = client.get("/healt")
+  response = client.get("/health")
 
   assert response.status_code == 200
   assert response.json() == {"status": "ok"}

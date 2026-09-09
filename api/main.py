@@ -2,12 +2,12 @@ from fastapi import Depends, FastAPI
 from functools import lru_cache
 
 from api import db
-from api.serialize import candle_to_dict
+from serialize import candle_to_dict
 
 app = FastAPI(title="ELT candles API")
 
-@app.get("/healt")
-def healt():
+@app.get("/health")
+def health():
   return {"status": "ok"}
 
 @lru_cache(maxsize=1)
@@ -15,7 +15,7 @@ def _engine():
   return db.get_engine()
 
 def read_candles(symbol, hours):
-  return db.read_candles(_engine, symbol, hours)
+  return db.read_candles(_engine(), symbol, hours)
 
 def get_reader():
   return read_candles
