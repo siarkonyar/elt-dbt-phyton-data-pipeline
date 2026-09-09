@@ -21,3 +21,6 @@ def test_health_returns_ok(api_main):
 
   assert response.status_code == 200
   assert response.json() == {"status": "ok"}
+
+def test_candles_with_no_rows_returns_an_empty_list(api_main):
+    

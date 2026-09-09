@@ -1,7 +1,10 @@
+from datetime import UTC, datetime
+from decimal import Decimal
 import importlib.util
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -189,6 +192,20 @@ def e2e_db(engine, rollup_db):
     _empty_the_tables(engine) #delete everything after the test finishes
 
 #-----------api-----------
+
+@pytest.fixture
+def _candle_row(**overrides):
+  defaults = {
+      "symbol": "NVDA",
+      "minute": datetime(2024, 1, 1, 12, 0, tzinfo=UTC),
+      "open": Decimal("100.0"),
+      "high": Decimal("108.0"),
+      "low": Decimal("95.0"),
+      "close": Decimal("104.0"),
+      "volume": Decimal("10.0"),
+      "trade_count": 4,
+  }
+  return SimpleNamespace(**{**defaults, **overrides})
 
 @pytest.fixture(scope="session")
 def api_serialize():
