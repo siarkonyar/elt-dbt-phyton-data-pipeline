@@ -22,8 +22,8 @@ def test_health_returns_ok(api_main):
   assert response.status_code == 200
   assert response.json() == {"status": "ok"}
 
-def test_candles_with_no_rows_returns_an_empty_list(api_main, _candle_row):
-    client = make_client(api_main, rows=[_candle_row])
+def test_candles_returns_the_serialised_rows(api_main, _candle_row):
+    client = make_client(api_main, rows=[_candle_row()])
 
     response = client.get("/candles?symbol=NVDA")
 

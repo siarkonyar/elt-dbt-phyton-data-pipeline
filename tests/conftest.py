@@ -194,18 +194,21 @@ def e2e_db(engine, rollup_db):
 #-----------api-----------
 
 @pytest.fixture
-def _candle_row(**overrides):
-  defaults = {
-      "symbol": "NVDA",
-      "minute": datetime(2024, 1, 1, 12, 0, tzinfo=UTC),
-      "open": Decimal("100.0"),
-      "high": Decimal("108.0"),
-      "low": Decimal("95.0"),
-      "close": Decimal("104.0"),
-      "volume": Decimal("10.0"),
-      "trade_count": 4,
-  }
-  return SimpleNamespace(**{**defaults, **overrides})
+def _candle_row():
+    def make(**overrides):
+        defaults = {
+            "symbol": "NVDA",
+            "minute": datetime(2024, 1, 1, 12, 0, tzinfo=UTC),
+            "open": Decimal("100.0"),
+            "high": Decimal("108.0"),
+            "low": Decimal("95.0"),
+            "close": Decimal("104.0"),
+            "volume": Decimal("10.0"),
+            "trade_count": 4,
+        }
+        return SimpleNamespace(**{**defaults, **overrides})
+
+    return make
 
 @pytest.fixture(scope="session")
 def api_serialize():

@@ -1,7 +1,8 @@
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from functools import lru_cache
 
 from api import db
+from api.serialize import candle_to_dict
 
 app = FastAPI(title="ELT candles API")
 
@@ -18,3 +19,7 @@ def read_candles(symbol, hours):
 
 def get_reader():
   return read_candles
+
+@app.get("/candles")
+def candles(symbol: str, hours: int = 1, reader = Depends(get_reader)):
+  return [candle_to_dict(row) for row in reader(symbol.upper(), hours)]
