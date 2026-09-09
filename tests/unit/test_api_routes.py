@@ -23,6 +23,8 @@ def make_recording_client(api_main):
 
     api_main.app.dependency_overrides[api_main.get_reader] = lambda: record_readings
 
+    return TestClient(api_main.app), calls
+
 def test_health_returns_ok(api_main):
   client = TestClient(api_main.app)
 
@@ -50,3 +52,39 @@ def test_candles_with_no_rows_returns_an_empty_list(api_main):
     assert response.status_code == 200
     body = response.json()
     assert len(body) == 0
+
+def test_the_symbol_is_upper_cased_before_the_lookup(api_main):
+    client, calls = make_recording_client(api_main)
+
+    response = client.get("/candles?symbol=nvda")
+
+    assert calls[0][0] == "NVDA"
+
+def test_a_missing_symbol_is_rejected(api_main):
+    client, calls = make_recording_client(api_main)
+
+    response = client.get("/candles")
+
+    assert response.status_code == 422
+
+def test_a_non_numeric_hours_is_rejected(api_main):
+    client, calls = make_recording_client(api_main)
+
+    response = client.get("/candles?symbol=nvda&hours=abc")
+
+    assert response.status_code == 422
+
+def test_hours_above_the_maximum_is_rejected(api_main):
+    client, calls = make_recording_client(api_main)
+
+    response = client.get("/candles?symbol=nvda&hours=999")
+
+    assert response.status_code == 422
+
+def test_hours_defaults_to_one_when_absent(api_main):
+    client, calls = make_recording_client(api_main)
+
+    response = client.get("/candles?symbol=nvda")
+
+    assert calls[0][1] == 1
+
