@@ -1,7 +1,10 @@
 import os
 from pathlib import Path
 
+import pandas as pd
 from sqlalchemy import create_engine
+
+from api.queries import GET_CANDLES_SQL
 
 def get_engine(env=None):
     env = os.environ if env is None else env
@@ -20,3 +23,11 @@ def get_engine(env=None):
 
     url = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{db_name}"
     return create_engine(url)
+
+def read_candles(engine, symbol, hours):
+    with engine.begin() as connection:
+        pd.read_sql(
+            GET_CANDLES_SQL,
+            connection,
+            params={"symbol": symbol, "hours": hours}
+        )
