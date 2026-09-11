@@ -1,7 +1,7 @@
 from fastapi import Depends, FastAPI, Query
 from functools import lru_cache
 
-from api import db
+import db
 from serialize import candle_to_dict
 
 app = FastAPI(title="ELT candles API")
