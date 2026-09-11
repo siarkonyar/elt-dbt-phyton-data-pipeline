@@ -1,6 +1,3 @@
-from datetime import UTC, datetime
-from decimal import Decimal
-from types import SimpleNamespace
 
 NUMERIC_FIELDS=("open", "high", "low", "close", "volume")
 

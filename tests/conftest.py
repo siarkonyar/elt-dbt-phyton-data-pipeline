@@ -1,8 +1,8 @@
-from datetime import UTC, datetime
-from decimal import Decimal
 import importlib.util
 import os
 import sys
+from datetime import UTC, datetime
+from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -147,23 +147,37 @@ def rollup_tables(connection, rollup_db):
     rollup_db.apply_schema(connection)
     return connection
 
-ROLLUP_BARE_MODULES = ("candles", "config", "db", "writer")
+def _load_with_bare_siblings(service, module_name, siblings):
+    """Load <service>/<module_name>.py with its siblings under bare names.
 
+    Inside its container a service has WORKDIR /app, so its modules import
+    each other by bare name: `from queries import GET_CANDLES_SQL`. In one
+    test process those bare names are shared, so the siblings are installed
+    for the duration of the load and put back afterwards.
 
-@pytest.fixture(scope="session")
-def rollup_main():
-    saved = {name: sys.modules.get(name) for name in ROLLUP_BARE_MODULES}
-    for name in ROLLUP_BARE_MODULES:
-        sys.modules[name] = _load_service_module("rollup", name)
+    `siblings` must be in dependency order - a module that imports another
+    has to come after it.
+    """
+    saved = {name: sys.modules.get(name) for name in siblings}
+    for name in siblings:
+        sys.modules[name] = _load_service_module(service, name)
 
     try:
-        return _load_service_module("rollup", "main")
+        return _load_service_module(service, module_name)
     finally:
         for name, module in saved.items():
             if module is None:
                 sys.modules.pop(name, None)
             else:
                 sys.modules[name] = module
+
+
+ROLLUP_BARE_MODULES = ("candles", "config", "db", "writer")
+
+
+@pytest.fixture(scope="session")
+def rollup_main():
+    return _load_with_bare_siblings("rollup", "main", ROLLUP_BARE_MODULES)
 
 
 @pytest.fixture(scope="session")
@@ -187,7 +201,7 @@ def e2e_db(engine, rollup_db):
         db.apply_schema(connection)          # raw_trades, stream_sessions
         rollup_db.apply_schema(connection)   # candles, rollup_runs
 
-    _empty_the_tables(engine) # delete everything from previous test if there are anything
+    _empty_the_tables(engine)  # anything a previous test left behind
     yield engine                             # an engine, not a connection
     _empty_the_tables(engine) #delete everything after the test finishes
 
@@ -220,20 +234,15 @@ def api_queries():
 
 @pytest.fixture(scope="session")
 def api_db():
-    return _load_service_module("api", "db")
+    """db.py does `from queries import ...`, so queries has to be in place."""
+    return _load_with_bare_siblings("api", "db", ("queries",))
 
-API_BARE_MODULES = ("db", "queries", "serialize")
+
+# queries before db: db imports it, and a sibling cannot be loaded before
+# the module it depends on.
+API_BARE_MODULES = ("queries", "serialize", "db")
+
 
 @pytest.fixture(scope="session")
 def api_main():
-    saved = {name: sys.modules.get(name) for name in API_BARE_MODULES}
-    for name in API_BARE_MODULES:
-        sys.modules[name] = _load_service_module("api", name)
-    try:
-        return _load_service_module("api", "main")
-    finally:
-        for name, module in saved.items():
-            if module is None:
-                sys.modules.pop(name, None)
-            else:
-                sys.modules[name] = module
+    return _load_with_bare_siblings("api", "main", API_BARE_MODULES)

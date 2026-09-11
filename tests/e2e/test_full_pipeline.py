@@ -27,7 +27,8 @@ def api_url(compose, path):
     port = compose.get_service_port("api", API_PORT)
     return f"http://{host}:{port}{path}"
 
-#this is written here because we want to call the nvidia cande only once throughout this session.
+#this is written here because we want to call the nvidia candle
+#only once throughout this session.
 #rand it is not going in the config file because we are gonna use it only in this file
 @pytest.fixture(scope="session")
 def nvda_candle(wait_for_candle):

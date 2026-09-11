@@ -2,7 +2,7 @@ import queue
 import sys
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from backoff import ExponentialBackoff
 from buffer import drain
@@ -26,7 +26,7 @@ class SocketEvents:
 
     def record(self, event_type, detail):
         """This is the on_event callback FinnhubSocket calls."""
-        self.last_message_at = datetime.now(timezone.utc)
+        self.last_message_at = datetime.now(UTC)
 
         if event_type == TRADE and detail:
             self.last_trade_at = self.last_message_at

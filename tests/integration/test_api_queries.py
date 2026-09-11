@@ -1,6 +1,5 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
-import pandas as pd
 from sqlalchemy import text
 
 HISTORY_HOURS = 24
@@ -14,7 +13,7 @@ INSERT_CANDLES_SQL = text(
 )
 
 def base_minute():
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return now.replace(second=0, microsecond=0) - timedelta(minutes=MINUTES_BACK)
 
 def insert_candles(engine, rows):

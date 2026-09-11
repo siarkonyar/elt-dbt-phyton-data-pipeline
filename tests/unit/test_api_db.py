@@ -1,5 +1,6 @@
 import pytest
 
+
 def test_a_missing_password_is_rejected(api_db):
     with pytest.raises(RuntimeError):
         api_db.get_engine({})

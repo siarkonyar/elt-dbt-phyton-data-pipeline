@@ -1,9 +1,9 @@
 import os
-from pathlib import Path
 
 from sqlalchemy import create_engine
 
 from queries import GET_CANDLES_SQL
+
 
 def get_engine(env=None):
     env = os.environ if env is None else env

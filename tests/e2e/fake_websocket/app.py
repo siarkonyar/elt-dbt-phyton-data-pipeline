@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from aiohttp import WSMsgType, web
 
@@ -27,7 +27,7 @@ def burst_payload(now=None):
     The base time is floored to a whole minute, so all four NVDA trades
     land inside the same minute and therefore inside the same candle.
     """
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     base = now.replace(second=0, microsecond=0) - timedelta(minutes=MINUTES_BACK)
 
     return {

@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pandas as pd
 from sqlalchemy import text
@@ -6,8 +6,8 @@ from sqlalchemy import text
 from candles import build_candles
 
 BASE_MINUTE = pd.Timestamp("2024-01-01 12:00:00", tz="UTC")
-WINDOW_END = datetime(2024, 1, 1, 12, 10, tzinfo=timezone.utc)
-WINDOW_START = datetime(2024, 1, 1, 12, 0, tzinfo=timezone.utc)
+WINDOW_END = datetime(2024, 1, 1, 12, 10, tzinfo=UTC)
+WINDOW_START = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
 
 CANDLE_COLUMNS = [
     "symbol", "minute", "open", "high", "low", "close", "volume", "trade_count",
@@ -61,10 +61,14 @@ def test_upsert_with_an_empty_frame_writes_nothing(rollup_tables, rollup_writer)
 
 def test_upsert_replaces_a_minute_it_has_already_written(rollup_tables, rollup_writer):
     # The partial candle, written while the minute was still filling.
-    rollup_writer.upsert_candles(rollup_tables, one_candle(close=104.0, volume=10.0, count=4))
+    rollup_writer.upsert_candles(
+        rollup_tables, one_candle(close=104.0, volume=10.0, count=4)
+    )
 
     # The finished candle, after the late trades arrived.
-    rollup_writer.upsert_candles(rollup_tables, one_candle(close=107.0, volume=18.0, count=9))
+    rollup_writer.upsert_candles(
+        rollup_tables, one_candle(close=107.0, volume=18.0, count=9)
+    )
 
     rows = rollup_tables.execute(STORED_CANDLES_SQL).all()
 
@@ -104,7 +108,9 @@ def test_different_symbols_live_side_by_side(rollup_tables, rollup_writer):
     assert stored == 2
 
 
-def test_candles_built_by_build_candles_can_actually_be_written(rollup_tables, rollup_writer):
+def test_candles_built_by_build_candles_can_actually_be_written(
+    rollup_tables, rollup_writer
+):
     # build_candles returns numpy.float64 and numpy.int64. psycopg2 has no
     # adapter for those - this fails with "can't adapt type 'numpy.float64'"
     # the moment _records stops converting to native Python types.

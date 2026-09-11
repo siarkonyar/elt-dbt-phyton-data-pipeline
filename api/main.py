@@ -1,5 +1,6 @@
-from fastapi import Depends, FastAPI, Query
 from functools import lru_cache
+
+from fastapi import Depends, FastAPI, Query
 
 import db
 from serialize import candle_to_dict
@@ -21,5 +22,9 @@ def get_reader():
   return read_candles
 
 @app.get("/candles")
-def candles(symbol: str = Query(..., min_length=1, max_length=10), hours: int = Query(1, ge=1, le=24), reader = Depends(get_reader)):
-  return [candle_to_dict(row) for row in reader(symbol.upper(), hours)]
+def candles(
+    symbol: str = Query(..., min_length=1, max_length=10),
+    hours: int = Query(1, ge=1, le=24),
+    reader=Depends(get_reader),
+):
+    return [candle_to_dict(row) for row in reader(symbol.upper(), hours)]

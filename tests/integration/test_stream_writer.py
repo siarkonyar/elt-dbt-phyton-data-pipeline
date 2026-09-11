@@ -1,11 +1,11 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import text
 
 from socket_client import Trade
 from writer import finish_session, heartbeat, insert_trades, start_session
 
-BASE_TIME = datetime(2024, 1, 1, 12, 0, tzinfo=timezone.utc)
+BASE_TIME = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
 
 
 def make_trade(symbol="NVDA", price=100.0, volume=5.0):

@@ -1,5 +1,6 @@
-from fastapi.testclient import TestClient
 import pytest
+from fastapi.testclient import TestClient
+
 
 @pytest.fixture(autouse=True)
 def clear_overrides(api_main):
@@ -56,7 +57,7 @@ def test_candles_with_no_rows_returns_an_empty_list(api_main):
 def test_the_symbol_is_upper_cased_before_the_lookup(api_main):
     client, calls = make_recording_client(api_main)
 
-    response = client.get("/candles?symbol=nvda")
+    client.get("/candles?symbol=nvda")
 
     assert calls[0][0] == "NVDA"
 
@@ -84,7 +85,7 @@ def test_hours_above_the_maximum_is_rejected(api_main):
 def test_hours_defaults_to_one_when_absent(api_main):
     client, calls = make_recording_client(api_main)
 
-    response = client.get("/candles?symbol=nvda")
+    client.get("/candles?symbol=nvda")
 
     assert calls[0][1] == 1
 

@@ -64,7 +64,9 @@ def test_missing_session_becomes_none():
 
 
 def test_http_errors_reach_the_caller():
-    session = FakeSession(FakeResponse(error=requests.HTTPError("429 Too Many Requests")))
+    session = FakeSession(
+        FakeResponse(error=requests.HTTPError("429 Too Many Requests"))
+    )
 
     with pytest.raises(requests.HTTPError):
         fetch_market_status(session, BASE_URL, timeout_seconds=10)
