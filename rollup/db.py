@@ -10,9 +10,9 @@ RECENT_TRADES_SQL = text(
     """
     SELECT symbol, trade_ts, price, volume
       FROM raw_trades
-     WHERE trade_ts >= :window_start
-     ORDER BY symbol, trade_ts
-     LIMIT :max_rows
+    WHERE trade_ts >= :window_start
+    ORDER BY symbol, trade_ts
+    LIMIT :max_rows
     """
 )
 

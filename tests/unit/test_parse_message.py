@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from socket_client import ERROR, TRADE, parse_message
 
@@ -34,7 +34,7 @@ def test_converts_millisecond_epoch_to_utc():
     _, trades = parse_message(raw)
 
     assert trades[0].trade_ts == datetime(
-        2023, 11, 14, 22, 13, 20, tzinfo=timezone.utc
+        2023, 11, 14, 22, 13, 20, tzinfo=UTC
     )
 
 

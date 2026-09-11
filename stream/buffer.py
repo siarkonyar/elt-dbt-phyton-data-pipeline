@@ -1,4 +1,4 @@
-import queue #cant name the file queue because of this import
+import queue  #cant name the file queue because of this import
 
 
 def drain(source_queue, max_rows):
@@ -7,7 +7,8 @@ def drain(source_queue, max_rows):
 
     while len(items) < max_rows:
         try:
-            items.append(source_queue.get_nowait())#gets an item from the que and puts it in the items list.
+            # gets an item from the que and puts it in the items list.
+            items.append(source_queue.get_nowait())
         except queue.Empty:#if the queue is empty break the loop
             break
 

@@ -27,7 +27,7 @@ POLL_SECONDS = 1
 POLL_TIMEOUT_SECONDS = 120
 
 DIAGNOSTIC_TABLES = ("raw_trades", "candles", "rollup_runs", "stream_sessions")
-DIAGNOSTIC_SERVICES = ("fake_websocket", "stream", "rollup")
+DIAGNOSTIC_SERVICES = ("fake_websocket", "stream", "rollup", "api")
 
 NEWEST_CANDLE_SQL = text(
     "SELECT * FROM candles WHERE symbol = :symbol ORDER BY minute DESC LIMIT 1"

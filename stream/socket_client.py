@@ -1,6 +1,6 @@
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import websocket
 
@@ -22,7 +22,7 @@ def parse_trade(item):
     try:
         return Trade(
             symbol=item["s"],
-            trade_ts=datetime.fromtimestamp(item["t"] / 1000, tz=timezone.utc),
+            trade_ts=datetime.fromtimestamp(item["t"] / 1000, tz=UTC),
             price=float(item["p"]),
             volume=float(item.get("v") or 0),
             conditions=",".join(str(code) for code in item.get("c") or ()),

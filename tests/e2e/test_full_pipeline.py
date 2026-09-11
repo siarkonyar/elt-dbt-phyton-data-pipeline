@@ -19,7 +19,16 @@ OTHER_CANDLES_SQL = text("SELECT count(*) FROM candles WHERE symbol = :symbol")
 STREAM_TRADES_SQL = text("SELECT sum(trades_received) FROM stream_sessions")
 ROLLUP_OK_SQL = text("SELECT count(*) FROM rollup_runs WHERE status = 'ok'")
 
-#this is written here because we want to call the nvidia cande only once throughout this session.
+API_PORT = 8000
+API_TIMEOUT_SECONDS = 10
+
+def api_url(compose, path):
+    host = compose.get_service_host("api", API_PORT)
+    port = compose.get_service_port("api", API_PORT)
+    return f"http://{host}:{port}{path}"
+
+#this is written here because we want to call the nvidia candle
+#only once throughout this session.
 #rand it is not going in the config file because we are gonna use it only in this file
 @pytest.fixture(scope="session")
 def nvda_candle(wait_for_candle):
@@ -93,3 +102,25 @@ def test_dashboard_image_answers_health_check(nvda_candle, compose):
     )
 
     assert response.status_code == 200
+
+def test_api_image_answers_health_check(compose):
+    response = requests.get(api_url(compose, "/health"), timeout=API_TIMEOUT_SECONDS,)
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+def test_api_serves_the_candle_over_http(compose):
+    response = requests.get(api_url(compose, "/candles"),
+                            params={"symbol": SYMBOL, "hours": CANDLE_WINDOW_HOURS},
+                            timeout=API_TIMEOUT_SECONDS,)
+
+    assert response.status_code == 200
+
+    candles = response.json()
+    assert len(candles) == 1
+
+    candle = candles[0]
+    prices = (candle["open"], candle["high"], candle["low"], candle["close"])
+
+    assert prices == EXPECTED_OHLC
+    assert candle["trade_count"] == NVDA_TRADES

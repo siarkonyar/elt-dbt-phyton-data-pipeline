@@ -1,6 +1,6 @@
 import sys
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from candles import build_candles
 from config import ConfigError, load_config
@@ -10,7 +10,7 @@ from writer import finish_run, start_run, upsert_candles
 
 def run_once(config, engine):
     """One pass over the trailing window. Returns candles written."""
-    window_end = datetime.now(timezone.utc)
+    window_end = datetime.now(UTC)
     window_start = window_end - timedelta(minutes=config.window_minutes)
 
     with engine.begin() as connection:

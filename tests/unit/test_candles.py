@@ -158,7 +158,10 @@ def test_two_symbols_in_one_minute_do_not_mix():
     candles = build_candles(trades)
 
     assert len(candles) == 2
-    assert dict(zip(candles.symbol, candles.close)) == {"NVDA": 100.0, "AMZN": 200.0}
+    assert dict(zip(candles.symbol, candles.close, strict=False)) == {
+        "NVDA": 100.0,
+        "AMZN": 200.0,
+    }
 
 
 # --- determinism, which is what makes re-running the upsert a no-op ---
@@ -172,7 +175,7 @@ def test_rows_come_back_ordered_by_minute_then_symbol():
 
     candles = build_candles(trades)
 
-    assert list(zip(candles.symbol, candles.minute)) == [
+    assert list(zip(candles.symbol, candles.minute, strict=False)) == [
         ("AMZN", at("12:00:00")),
         ("NVDA", at("12:00:00")),
         ("NVDA", at("12:01:00")),

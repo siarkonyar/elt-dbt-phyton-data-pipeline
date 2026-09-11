@@ -43,6 +43,12 @@ services:
       ROLLUP_INTERVAL_SECONDS: 5
       DESTINATION_POSTGRES_PASSWORD: e2e
 
+  api:
+    environment:
+      DESTINATION_POSTGRES_PASSWORD: e2e
+    ports: !override
+      - '8000'
+
   dashboard:
     ports: !override
       - '8501'

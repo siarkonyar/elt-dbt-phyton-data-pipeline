@@ -6,7 +6,7 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["stream"]
+source = ["rollup", "stream", "api"]
 omit = [
     "stream/main.py",   # an infinite loop; covering it proves little
 ]
@@ -20,7 +20,12 @@ target-version = "py311"
 # Each service runs with its own directory on sys.path, so `from db import ...`
 # means dashboard/db.py or rollup/db.py, not some package on PyPI. Without this
 # ruff calls those third-party and sorts them in with sqlalchemy.
-src = [".", "dashboard", "rollup", "stream"]
+src = [".", "api", "dashboard", "rollup", "stream"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP"]
+
+# FastAPI declares dependencies and query rules as argument defaults - that is
+# the framework's documented style, not the mutable-default bug B008 hunts for.
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query"]
