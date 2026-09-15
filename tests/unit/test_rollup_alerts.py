@@ -239,8 +239,6 @@ def test_a_decimal_threshold_comes_back_as_a_float():
 
 
 def test_the_alerts_handed_in_are_left_alone():
-    # The alerts above are module-level constants shared by every test in
-    # this file. Writing the price onto one would quietly corrupt the rest.
     one = alert(1, "NVDA", "above", 100.0)
     before = vars(one).copy()
 
