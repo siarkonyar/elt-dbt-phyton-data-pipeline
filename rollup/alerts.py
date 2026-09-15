@@ -17,3 +17,14 @@ def find_triggered(alerts, prices):
 
 
     return result
+
+def latest_closes(candles):
+    minute_map = {}
+    price_map = {}
+
+    for candle in candles.itertuples(index=False):
+        if minute_map.get(candle.symbol) is None or candle.minute > minute_map.get(candle.symbol):
+            minute_map[candle.symbol] = candle.minute
+            price_map[candle.symbol] = float(candle.close)
+
+    return price_map
