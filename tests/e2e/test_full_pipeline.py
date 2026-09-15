@@ -103,13 +103,13 @@ def test_dashboard_image_answers_health_check(nvda_candle, compose):
 
     assert response.status_code == 200
 
-def test_api_image_answers_health_check(compose):
+def test_api_image_answers_health_check(nvda_candle, compose):
     response = requests.get(api_url(compose, "/health"), timeout=API_TIMEOUT_SECONDS,)
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
 
-def test_api_serves_the_candle_over_http(compose):
+def test_api_serves_the_candle_over_http(nvda_candle, compose):
     response = requests.get(api_url(compose, "/candles"),
                             params={"symbol": SYMBOL, "hours": CANDLE_WINDOW_HOURS},
                             timeout=API_TIMEOUT_SECONDS,)
