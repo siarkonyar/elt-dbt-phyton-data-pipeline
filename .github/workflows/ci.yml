@@ -55,33 +55,34 @@ jobs:
 
       - name: Run tests
         run: >-
-          pytest -m "not integration and not e2e" -rA --durations=10
-          --cov --cov-report=term-missing
-          --cov-report=xml:reports/unit-coverage.xml
-          --junitxml=reports/unit-junit.xml
-
-      - name: Coverage summary
-        if: always()
-        run: |
-          echo '## unit coverage' >> "$GITHUB_STEP_SUMMARY"
-          coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY" || echo '_no coverage data_' >> "$GITHUB_STEP_SUMMARY"
+          pytest -m "not integration and not e2e" -v -rA --durations=10
+          --cov --junitxml=reports/unit-junit.xml
 
       - name: Publish test results
         uses: EnricoMi/publish-unit-test-result-action@v2
         if: always()
         with:
           check_name: unit test results
-          files: reports/*-junit.xml
+          files: reports/*.xml
           report_individual_runs: true
-          check_run_annotations: all tests, skipped tests
+          report_suite_logs: any
 
-      - name: Upload reports
-        uses: actions/upload-artifact@v4
+      # These run after the action so its counts table stays at the top of the
+      # job summary and our detail lands underneath it.
+      - name: Coverage line
         if: always()
-        with:
-          name: unit-reports
-          path: reports/
-          if-no-files-found: warn
+        run: |
+          if total=$(coverage report --format=total); then
+            echo "**unit coverage: ${total}%**" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "_unit coverage unavailable_" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Test detail
+        if: always()
+        run: >-
+          python scripts/test_summary.py reports/unit-junit.xml unit
+          >> "$GITHUB_STEP_SUMMARY"
 
   integration:
     name: integration
@@ -133,33 +134,32 @@ jobs:
 
       - name: Run tests
         run: >-
-          pytest -m "integration" -rA --durations=10
-          --cov --cov-report=term-missing
-          --cov-report=xml:reports/integration-coverage.xml
-          --junitxml=reports/integration-junit.xml
-
-      - name: Coverage summary
-        if: always()
-        run: |
-          echo '## integration coverage' >> "$GITHUB_STEP_SUMMARY"
-          coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY" || echo '_no coverage data_' >> "$GITHUB_STEP_SUMMARY"
+          pytest -m "integration" -v -rA --durations=10
+          --cov --junitxml=reports/integration-junit.xml
 
       - name: Publish test results
         uses: EnricoMi/publish-unit-test-result-action@v2
         if: always()
         with:
           check_name: integration test results
-          files: reports/*-junit.xml
+          files: reports/*.xml
           report_individual_runs: true
-          check_run_annotations: all tests, skipped tests
+          report_suite_logs: any
 
-      - name: Upload reports
-        uses: actions/upload-artifact@v4
+      - name: Coverage line
         if: always()
-        with:
-          name: integration-reports
-          path: reports/
-          if-no-files-found: warn
+        run: |
+          if total=$(coverage report --format=total); then
+            echo "**integration coverage: ${total}%**" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "_integration coverage unavailable_" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Test detail
+        if: always()
+        run: >-
+          python scripts/test_summary.py reports/integration-junit.xml integration
+          >> "$GITHUB_STEP_SUMMARY"
 
   e2e:
     name: e2e
@@ -184,7 +184,7 @@ jobs:
 
       - name: Run tests
         run: >-
-          pytest -m e2e -rA --durations=10
+          pytest -m e2e -v -rA --durations=10
           --junitxml=reports/e2e-junit.xml
 
       - name: Publish test results
@@ -192,14 +192,14 @@ jobs:
         if: always()
         with:
           check_name: e2e test results
-          files: reports/*-junit.xml
+          files: reports/*.xml
           report_individual_runs: true
-          check_run_annotations: all tests, skipped tests
+          report_suite_logs: any
 
-      - name: Upload reports
-        uses: actions/upload-artifact@v4
+      # No coverage line here: e2e drives the real container images, so nothing
+      # in this job's Python process is measured.
+      - name: Test detail
         if: always()
-        with:
-          name: e2e-reports
-          path: reports/
-          if-no-files-found: warn
+        run: >-
+          python scripts/test_summary.py reports/e2e-junit.xml e2e
+          >> "$GITHUB_STEP_SUMMARY"
