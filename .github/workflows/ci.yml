@@ -1,9 +1,10 @@
 name: CI
 
-# Every push, every branch. A pull request shows the same check without a
-# second run, because GitHub attaches a check to the commit, not to the event.
+# Pushes to main only. `branches` belongs inside the event, not beside it:
+# `on: branch: [main]` names no event at all, so the workflow never runs.
 on:
-  branch: [main]
+  push:
+    branches: [main]
 
 # A new push to a branch makes the previous run pointless. Cancel it.
 concurrency:
