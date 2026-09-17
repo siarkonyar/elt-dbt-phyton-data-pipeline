@@ -2,7 +2,8 @@ name: CI
 
 # Every push, every branch. A pull request shows the same check without a
 # second run, because GitHub attaches a check to the commit, not to the event.
-on: push
+on:
+  branch: [main]
 
 # A new push to a branch makes the previous run pointless. Cancel it.
 concurrency:

@@ -13,6 +13,16 @@ INSERT_TRADE_SQL = text(
     """
 )
 
+INSERT_ALERT_SQL = text(
+    """
+    INSERT INTO price_alerts (symbol, direction, threshold)
+    VALUES (:symbol, 'above', :threshold)
+    RETURNING alert_id
+    """
+)
+
+ALERT_SQL = text("SELECT * FROM price_alerts WHERE alert_id = :alert_id")
+
 def base_minute():
     now = datetime.now(UTC)
     return now.replace(second=0, microsecond=0) - timedelta(minutes=MINUTES_BACK)
@@ -47,6 +57,17 @@ def read_candles(engine, queries):
     return pd.read_sql(
         queries.CANDLES_SQL, engine, params={"hours": HISTORY_HOURS}
     )
+
+def insert_alert(engine, symbol, threshold):
+    """Committed for real, like the trades - run_once opens its own connection."""
+    with engine.begin() as connection:
+        return connection.execute(
+            INSERT_ALERT_SQL, {"symbol": symbol, "threshold": threshold}
+        ).scalar_one()
+
+def read_alert(engine, alert_id):
+    with engine.connect() as connection:
+        return connection.execute(ALERT_SQL, {"alert_id": alert_id}).one()
 
 def test_a_trade_becomes_a_candle_the_dashboard_can_find(
     e2e_db, rollup_main, rollup_config, dashboard_queries
@@ -104,3 +125,73 @@ def test_a_late_trade_corrects_its_candle_instead_of_duplicating(
 
     runs = pd.read_sql(dashboard_queries.ROLLUP_RUNS_SQL, e2e_db)
     assert len(runs) == 2
+
+# --- price alerts ---
+
+def test_an_alert_fires_when_the_rollup_sees_its_price(
+    e2e_db, rollup_main, rollup_config
+):
+    """The whole feature, one layer below the containers.
+
+    one_busy_minute closes NVDA at 104, so an alert waiting for 100 has to be
+    stamped by the same run that wrote the candle.
+    """
+    insert_trades(e2e_db, one_busy_minute(base_minute()))
+    alert_id = insert_alert(e2e_db, "NVDA", 100.0)
+
+    rollup_main.run_once(rollup_config.load_config({}), e2e_db)
+
+    alert = read_alert(e2e_db, alert_id)
+
+    assert alert.triggered_at is not None
+    assert float(alert.triggered_price) == 104.0
+
+def test_an_alert_the_price_never_reached_stays_waiting(
+    e2e_db, rollup_main, rollup_config
+):
+    # Without this one, a run_once that fired every alert unconditionally
+    # would still pass the test above.
+    insert_trades(e2e_db, one_busy_minute(base_minute()))
+    alert_id = insert_alert(e2e_db, "NVDA", 500.0)
+
+    rollup_main.run_once(rollup_config.load_config({}), e2e_db)
+
+    assert read_alert(e2e_db, alert_id).triggered_at is None
+
+def test_an_alert_for_a_symbol_that_did_not_trade_stays_waiting(
+    e2e_db, rollup_main, rollup_config
+):
+    # TSLA never traded in this window, so there is no price to judge it
+    # against. The threshold is one no real price could miss, so a run that
+    # invented a default price would fire this and lie to the user.
+    insert_trades(e2e_db, one_busy_minute(base_minute()))
+    alert_id = insert_alert(e2e_db, "TSLA", 1.0)
+
+    rollup_main.run_once(rollup_config.load_config({}), e2e_db)
+
+    assert read_alert(e2e_db, alert_id).triggered_at is None
+
+def test_an_alert_that_fired_is_left_alone_by_the_next_run(
+    e2e_db, rollup_main, rollup_config
+):
+    """The rollup re-runs every minute over an overlapping window, so it
+    meets the same rows again and again. A fired alert has to keep the
+    moment and the price that first set it off, never the newest ones.
+    """
+    config = rollup_config.load_config({})
+    minute = base_minute()
+
+    insert_trades(e2e_db, one_busy_minute(minute))
+    alert_id = insert_alert(e2e_db, "NVDA", 100.0)
+    rollup_main.run_once(config, e2e_db)
+
+    first = read_alert(e2e_db, alert_id)
+
+    # A late trade moves the close to 130. The alert must not follow it.
+    insert_trades(e2e_db, [("NVDA", minute + timedelta(seconds=50), 130.0, 2.0)])
+    rollup_main.run_once(config, e2e_db)
+
+    again = read_alert(e2e_db, alert_id)
+
+    assert again.triggered_at == first.triggered_at
+    assert float(again.triggered_price) == 104.0
