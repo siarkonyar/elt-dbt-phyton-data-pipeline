@@ -26,3 +26,14 @@ CREATE TABLE IF NOT EXISTS rollup_runs (
     status          TEXT        NOT NULL,
     error_message   TEXT
 );
+
+CREATE TABLE IF NOT EXISTS price_alerts (
+    alert_id        BIGSERIAL   PRIMARY KEY,
+    symbol          TEXT        NOT NULL,
+    direction       TEXT        NOT NULL
+                    CHECK (direction IN ('above', 'below')),
+    threshold       NUMERIC     NOT NULL,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    triggered_at    TIMESTAMPTZ,
+    triggered_price NUMERIC
+);

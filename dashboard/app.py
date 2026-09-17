@@ -6,8 +6,10 @@ import streamlit as st
 
 from db import get_destination_engine, table_exists
 from queries import (
+    ALERTS_SQL,
     CANDLE_STATUS_SQL,
     CANDLES_SQL,
+    INSERT_ALERT_SQL,
     LATEST_SQL,
     ROLLUP_RUNS_SQL,
     SESSIONS_SQL,
@@ -30,6 +32,10 @@ CANDLE_DOWN_COLOR = "#ef5350"
 CANDLE_CHART_HEIGHT = 320
 MINUTE_MILLISECONDS = 60_000
 
+# Matches the CHECK constraint on price_alerts.direction.
+ALERT_DIRECTIONS = ("above", "below")
+ALERT_MIN_THRESHOLD = 0.01
+
 
 def load_latest(engine):
     return pd.read_sql(LATEST_SQL, engine)
@@ -49,6 +55,19 @@ def load_rollup_runs(engine):
 
 def load_candle_status(engine):
     return pd.read_sql(CANDLE_STATUS_SQL, engine)
+
+
+def load_alerts(engine):
+    return pd.read_sql(ALERTS_SQL, engine)
+
+
+def create_alert(engine, symbol, direction, threshold):
+    """The only row this page writes. Everything else here is read-only."""
+    with engine.begin() as connection:
+        connection.execute(
+            INSERT_ALERT_SQL,
+            {"symbol": symbol, "direction": direction, "threshold": threshold},
+        )
 
 
 # The only query on the page that reads more than a handful of rows, and the
@@ -279,6 +298,77 @@ def render_rollup_health(runs, status, last_trade_at):
         st.dataframe(runs, use_container_width=True, hide_index=True)
 
 
+def alert_status(row):
+    """One readable column instead of two raw values to compare by eye."""
+    if pd.isna(row["triggered_at"]):
+        return "waiting"
+
+    return f"fired at ${row['triggered_price']:,.2f}"
+
+
+def render_alert_form(engine):
+    """Deliberately outside every fragment.
+
+    A form inside a fragment on a timer is redrawn every few seconds, which
+    wipes whatever the user is halfway through typing.
+    """
+    st.subheader("Price alerts")
+
+    if not table_exists(engine, "price_alerts"):
+        st.info("`price_alerts` does not exist yet - start the `rollup` service.")
+        return
+
+    st.caption(
+        "The `rollup` service checks these once a minute against the newest "
+        "candle close. An alert fires once, records the price that set it off, "
+        "and then stays put."
+    )
+
+    with st.form("new-alert", clear_on_submit=True):
+        symbol_column, direction_column, price_column = st.columns([2, 1, 1])
+        symbol = symbol_column.text_input("Symbol", placeholder="NVDA")
+        direction = direction_column.selectbox("When the price is", ALERT_DIRECTIONS)
+        threshold = price_column.number_input(
+            "this price", min_value=ALERT_MIN_THRESHOLD, value=None, step=1.0
+        )
+        submitted = st.form_submit_button("Add alert")
+
+    if not submitted:
+        return
+
+    # Symbols are stored the way the feed sends them, so match that here -
+    # an alert on "nvda" would wait for a price that never arrives.
+    wanted = symbol.strip().upper()
+
+    if not wanted:
+        st.error("Enter a symbol.")
+        return
+
+    if threshold is None:
+        st.error("Enter a price to watch for.")
+        return
+
+    create_alert(engine, wanted, direction, float(threshold))
+    st.success(f"Watching {wanted} for {direction} ${threshold:,.2f}.")
+
+
+def render_alert_list(engine):
+    alerts = load_alerts(engine)
+
+    if alerts.empty:
+        st.caption("No alerts yet.")
+        return
+
+    shown = to_float(alerts, ["threshold", "triggered_price"])
+    shown["status"] = shown.apply(alert_status, axis=1)
+
+    st.dataframe(
+        shown[["symbol", "direction", "threshold", "status", "created_at"]],
+        use_container_width=True,
+        hide_index=True,
+    )
+
+
 engine = get_destination_engine()
 
 st.title("Live trades")
@@ -353,5 +443,18 @@ def history():
     render_rollup_health(runs, load_candle_status(engine), last_trade_at)
 
 
+# The list gets its own fragment so a fired alert appears on its own, without
+# the user having to touch the page. The form above it stays out of any
+# fragment - see render_alert_form.
+@st.fragment(run_every=CANDLE_REFRESH)
+def alerts():
+    if not table_exists(engine, "price_alerts"):
+        return
+
+    render_alert_list(engine)
+
+
 live()
 history()
+render_alert_form(engine)
+alerts()

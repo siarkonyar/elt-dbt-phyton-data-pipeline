@@ -92,3 +92,26 @@ def finish_run(
             "error_message": error_message,
         },
     )
+
+MARK_TRIGGERED_SQL = text(
+    """
+    UPDATE price_alerts
+       SET triggered_at     = now(),
+           triggered_price     = :triggered_price
+     WHERE alert_id = :alert_id
+     AND triggered_at IS NULL
+    """
+)
+
+def mark_triggered(connection, triggered):
+    if not triggered:
+        return 0
+
+    connection.execute(
+        MARK_TRIGGERED_SQL,
+        [
+            {"alert_id": fired["alert_id"], "triggered_price": fired["price"]}
+            for fired in triggered
+        ],
+    )
+    return len(triggered)

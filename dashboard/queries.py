@@ -97,3 +97,25 @@ CANDLE_STATUS_SQL = text(
                AS approx_candles
     """
 )
+
+# The rollup owns price_alerts and is the only thing that fires them. This
+# page adds rows and reads their state back, nothing else.
+# Newest first: a user wants to see the alert they just typed.
+ALERTS_SQL = text(
+    """
+    SELECT alert_id, symbol, direction, threshold, created_at,
+           triggered_at, triggered_price
+      FROM price_alerts
+     ORDER BY alert_id DESC
+     LIMIT 20
+    """
+)
+
+# triggered_at and triggered_price are left NULL on purpose - that is what
+# "still waiting" means, and only the rollup may fill them in.
+INSERT_ALERT_SQL = text(
+    """
+    INSERT INTO price_alerts (symbol, direction, threshold)
+    VALUES (:symbol, :direction, :threshold)
+    """
+)

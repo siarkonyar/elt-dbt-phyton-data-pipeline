@@ -137,6 +137,10 @@ def rollup_config():
 def rollup_writer():
     return _load_service_module("rollup", "writer")
 
+@pytest.fixture(scope="session")
+def rollup_alerts():
+    return _load_service_module("rollup", "alerts")
+
 
 @pytest.fixture(scope="session")
 def rollup_db():
@@ -172,7 +176,7 @@ def _load_with_bare_siblings(service, module_name, siblings):
                 sys.modules[name] = module
 
 
-ROLLUP_BARE_MODULES = ("candles", "config", "db", "writer")
+ROLLUP_BARE_MODULES = ("candles", "config", "db", "writer", "alerts")
 
 
 @pytest.fixture(scope="session")
@@ -187,7 +191,9 @@ def dashboard_queries():
     return _load_service_module("dashboard", "queries")
 
 
-TRUNCATE_SQL = text("TRUNCATE raw_trades, candles, rollup_runs RESTART IDENTITY")
+TRUNCATE_SQL = text(
+    "TRUNCATE raw_trades, candles, rollup_runs, price_alerts RESTART IDENTITY"
+)
 
 
 def _empty_the_tables(engine):
