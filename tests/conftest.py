@@ -191,7 +191,9 @@ def dashboard_queries():
     return _load_service_module("dashboard", "queries")
 
 
-TRUNCATE_SQL = text("TRUNCATE raw_trades, candles, rollup_runs, price_alerts RESTART IDENTITY")
+TRUNCATE_SQL = text(
+    "TRUNCATE raw_trades, candles, rollup_runs, price_alerts RESTART IDENTITY"
+)
 
 
 def _empty_the_tables(engine):

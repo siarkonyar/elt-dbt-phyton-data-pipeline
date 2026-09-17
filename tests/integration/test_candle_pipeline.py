@@ -74,7 +74,7 @@ def test_a_trade_becomes_a_candle_the_dashboard_can_find(
 ):
     insert_trades(e2e_db, one_busy_minute(base_minute()))
 
-    written = rollup_main.run_once(rollup_config.load_config({}), e2e_db)
+    written, _ = rollup_main.run_once(rollup_config.load_config({}), e2e_db)
 
     assert written == 2
 

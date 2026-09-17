@@ -2,14 +2,19 @@ import sys
 import time
 from datetime import UTC, datetime, timedelta
 
+from alerts import find_triggered, latest_closes
 from candles import build_candles
 from config import ConfigError, load_config
-from db import apply_schema, get_engine, read_recent_trades
-from writer import finish_run, start_run, upsert_candles
+from db import apply_schema, get_engine, read_pending_alerts, read_recent_trades
+from writer import finish_run, mark_triggered, start_run, upsert_candles
 
 
 def run_once(config, engine):
-    """One pass over the trailing window. Returns candles written."""
+    """One pass over the trailing window.
+
+    Returns (candles written, alerts fired) - the same shape on the failure
+    path, so the caller can always unpack it.
+    """
     window_end = datetime.now(UTC)
     window_start = window_end - timedelta(minutes=config.window_minutes)
 
@@ -21,6 +26,13 @@ def run_once(config, engine):
             trades = read_recent_trades(connection, window_start, config.max_rows)
             candles = build_candles(trades)
             written = upsert_candles(connection, candles)
+
+            prices = latest_closes(candles)
+            alerts = read_pending_alerts(connection)
+
+            triggered_alerts = find_triggered(alerts, prices)
+
+            triggered = mark_triggered(connection, triggered_alerts)
     except Exception as error:
         message = f"{type(error).__name__}: {error}"
         print(f"rollup failed: {message}", file=sys.stderr)
@@ -28,12 +40,12 @@ def run_once(config, engine):
         with engine.begin() as connection:
             finish_run(connection, run_id, "failed", error_message=message)
 
-        return 0
+        return 0, 0
 
     with engine.begin() as connection:
         finish_run(connection, run_id, "ok", len(trades), written)
 
-    return written
+    return written, triggered
 
 
 def main():
@@ -50,8 +62,10 @@ def main():
 
     while True:
         try:
-            written = run_once(config, engine)
+            written, triggered = run_once(config, engine)
+
             print(f"{written} candles written")
+            print(f"{triggered} alerts triggered")
         except Exception as error:
             # run_once handles its own failures; reaching here means the
             # database itself went away. Log it and keep the loop alive.

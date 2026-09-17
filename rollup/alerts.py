@@ -6,7 +6,9 @@ def find_triggered(alerts, prices):
         price = prices.get(alert.symbol)
         if price is None:
             continue
-        if (price >= alert.threshold and alert.direction == "above") or (price <= alert.threshold and alert.direction == "below"):
+        if (price >= alert.threshold and alert.direction == "above") or (
+            price <= alert.threshold and alert.direction == "below"
+        ):
             result.append({
                 "alert_id": alert.alert_id,
                 "symbol": alert.symbol,
@@ -23,7 +25,9 @@ def latest_closes(candles):
     price_map = {}
 
     for candle in candles.itertuples(index=False):
-        if minute_map.get(candle.symbol) is None or candle.minute > minute_map.get(candle.symbol):
+        seen = minute_map.get(candle.symbol)
+
+        if seen is None or candle.minute > seen:
             minute_map[candle.symbol] = candle.minute
             price_map[candle.symbol] = float(candle.close)
 
