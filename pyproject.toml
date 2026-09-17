@@ -1,5 +1,7 @@
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+junit_logging = "all"
+junit_log_passing_tests = true
 markers = [
     "integration: needs a real Postgres; skipped when none is reachable",
     "e2e: runs the real container images under docker compose; needs Docker",
