@@ -22,6 +22,18 @@ ROLLUP_OK_SQL = text("SELECT count(*) FROM rollup_runs WHERE status = 'ok'")
 API_PORT = 8000
 API_TIMEOUT_SECONDS = 10
 
+# Below the price NVDA closes the minute at, so the very next rollup pass
+# has to fire it.
+ALERT_THRESHOLD = 100.0
+
+NEW_ALERT_SQL = text(
+    """
+    INSERT INTO price_alerts (symbol, direction, threshold)
+    VALUES (:symbol, 'above', :threshold)
+    RETURNING alert_id
+    """
+)
+
 def api_url(compose, path):
     host = compose.get_service_host("api", API_PORT)
     port = compose.get_service_port("api", API_PORT)
@@ -124,3 +136,25 @@ def test_api_serves_the_candle_over_http(nvda_candle, compose):
 
     assert prices == EXPECTED_OHLC
     assert candle["trade_count"] == NVDA_TRADES
+
+def test_the_rollup_container_fires_a_users_alert(
+    nvda_candle, e2e_engine, wait_for_triggered_alert
+):
+    """The last link in the chain: a row a user would have typed on the
+    dashboard, judged by the real rollup container.
+
+    Depends on nvda_candle so price_alerts exists and the pipeline is known
+    to be alive. The rollup re-runs over an overlapping window, so an alert
+    inserted after that candle landed is still picked up by the next pass.
+
+    The price is checked against the candle the pipeline actually produced,
+    not a constant: firing is only correct if it fired at the real close.
+    """
+    with e2e_engine.begin() as connection:
+        alert_id = connection.execute(
+            NEW_ALERT_SQL, {"symbol": SYMBOL, "threshold": ALERT_THRESHOLD}
+        ).scalar_one()
+
+    alert = wait_for_triggered_alert(alert_id)
+
+    assert float(alert.triggered_price) == float(nvda_candle.close)

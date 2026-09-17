@@ -33,6 +33,8 @@ NEWEST_CANDLE_SQL = text(
     "SELECT * FROM candles WHERE symbol = :symbol ORDER BY minute DESC LIMIT 1"
 )
 
+ALERT_SQL = text("SELECT * FROM price_alerts WHERE alert_id = :alert_id")
+
 
 @pytest.fixture(scope="session")
 def compose():
@@ -138,5 +140,44 @@ def wait_for_candle(e2e_engine, compose):
             time.sleep(POLL_SECONDS)
 
         pytest.fail(_diagnostics(e2e_engine, compose, symbol, trade_count))
+
+    return wait
+
+
+@pytest.fixture(scope="session")
+def wait_for_triggered_alert(e2e_engine, compose):
+    """Waits for the rollup container to stamp one alert.
+
+    The overlay drops the rollup interval to 5s, so this normally returns on
+    the first or second poll. A timeout means the pipeline produced candles
+    but the alert path never ran, so the same row counts and container logs
+    the candle wait prints are what you want to see.
+    """
+
+    def wait(alert_id):
+        deadline = time.monotonic() + POLL_TIMEOUT_SECONDS
+
+        while time.monotonic() < deadline:
+            with e2e_engine.connect() as connection:
+                row = connection.execute(ALERT_SQL, {"alert_id": alert_id}).one()
+
+            if row.triggered_at is not None:
+                return row
+
+            time.sleep(POLL_SECONDS)
+
+        pytest.fail(
+            "\n".join(
+                [
+                    f"alert {alert_id} was never triggered after "
+                    f"{POLL_TIMEOUT_SECONDS}s",
+                    "",
+                    "row counts:",
+                    *_row_counts(e2e_engine),
+                    "",
+                    *_service_logs(compose),
+                ]
+            )
+        )
 
     return wait
