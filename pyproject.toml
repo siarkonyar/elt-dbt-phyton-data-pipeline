@@ -30,4 +30,4 @@ select = ["E", "F", "W", "I", "B", "UP"]
 # FastAPI declares dependencies and query rules as argument defaults - that is
 # the framework's documented style, not the mutable-default bug B008 hunts for.
 [tool.ruff.lint.flake8-bugbear]
-extend-immutable-calls = ["fastapi.Depends", "fastapi.Query"]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Header"]

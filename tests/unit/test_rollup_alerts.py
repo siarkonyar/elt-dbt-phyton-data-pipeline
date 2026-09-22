@@ -8,16 +8,10 @@ from candles import CANDLE_COLUMNS
 
 
 def at(clock):
-    """'12:01' -> a UTC timestamp on 2024-01-01."""
     return pd.Timestamp(f"2024-01-01 {clock}", tz="UTC")
 
 
 def candles_frame(rows):
-    """(symbol, minute, close) tuples -> a frame shaped like build_candles output.
-
-    open/high/low are filled with the close. latest_closes never reads them,
-    but the frame should still carry every column the real one carries.
-    """
     return pd.DataFrame(
         [
             {
@@ -37,12 +31,6 @@ def candles_frame(rows):
 
 
 def alert(alert_id, symbol, direction, threshold):
-    """Stands in for one row of the price_alerts table.
-
-    SimpleNamespace rather than a dict: in production these arrive as
-    SQLAlchemy Row objects, read as alert.symbol. A dict would let the code
-    use alert["symbol"], pass the test, then break against the real database.
-    """
     return SimpleNamespace(
         alert_id=alert_id,
         symbol=symbol,
@@ -52,7 +40,6 @@ def alert(alert_id, symbol, direction, threshold):
 
 
 def fired_ids(alerts, prices):
-    """Just the ids that fired - keeps the condition tests to one line each."""
     return [fired["alert_id"] for fired in find_triggered(alerts, prices)]
 
 
@@ -122,9 +109,6 @@ def test_a_symbol_maps_to_its_newest_close():
 
 
 def test_the_newest_close_is_found_by_minute_not_by_row_order():
-    # build_candles happens to return rows sorted by minute, so a version
-    # that simply took the last row would pass every other test here and
-    # still be wrong the moment that ordering changed.
     assert latest_closes(SHUFFLED) == {"NVDA": 104.0}
 
 
@@ -133,8 +117,6 @@ def test_each_symbol_keeps_its_own_close():
 
 
 def test_decimal_closes_from_postgres_become_floats():
-    # NUMERIC arrives as Decimal. Decimal and float compare fine, but they
-    # cannot be mixed in arithmetic, and Decimal is not JSON-serialisable.
     price = latest_closes(DECIMAL_CLOSE)["NVDA"]
 
     assert price == 104.25
@@ -150,8 +132,6 @@ def test_the_candles_handed_in_are_left_alone():
     assert candles.equals(before)
 
 
-# --- find_triggered: nothing to do ---
-
 def test_no_alerts_fire_nothing():
     assert find_triggered([], PRICES) == []
 
@@ -159,8 +139,6 @@ def test_no_alerts_fire_nothing():
 def test_alerts_fire_nothing_when_no_candles_were_built():
     assert find_triggered([ABOVE_HIT, BELOW_HIT], {}) == []
 
-
-# --- find_triggered: the above condition ---
 
 def test_an_above_alert_fires_once_the_price_reaches_it():
     assert fired_ids([ABOVE_HIT], PRICES) == [1]
@@ -171,11 +149,8 @@ def test_an_above_alert_stays_quiet_below_its_threshold():
 
 
 def test_an_above_alert_fires_at_exactly_its_threshold():
-    # "tell me when it reaches 104" means 104 counts, so this is >= not >.
     assert fired_ids([ABOVE_EXACT], PRICES) == [3]
 
-
-# --- find_triggered: the below condition ---
 
 def test_a_below_alert_fires_once_the_price_reaches_it():
     assert fired_ids([BELOW_HIT], PRICES) == [4]
@@ -189,12 +164,7 @@ def test_a_below_alert_fires_at_exactly_its_threshold():
     assert fired_ids([BELOW_EXACT], PRICES) == [6]
 
 
-# --- find_triggered: which alerts are considered at all ---
-
 def test_an_alert_whose_symbol_had_no_candle_is_skipped():
-    # The threshold here is one no price could miss, so a version that
-    # defaulted the missing price to 0 would fire it and tell a user about
-    # a price that was never traded. Skipping is the only right answer.
     assert fired_ids([NO_PRICE], PRICES) == []
 
 
@@ -207,19 +177,11 @@ def test_only_the_alerts_that_met_their_condition_come_back():
 
 
 def test_fired_alerts_keep_the_order_they_arrived_in():
-    # MIXED is deliberately not in id order, and nothing sorts the result.
-    # Delete that guarantee and this is the test that notices.
     fired = fired_ids(MIXED, PRICES)
 
     assert fired != sorted(fired)
 
-
-# --- find_triggered: what a fired alert carries ---
-
 def test_a_fired_alert_carries_the_whole_story():
-    # alert_id and price are what the UPDATE binds; symbol, direction and
-    # threshold ride along so a webhook never has to go back to the
-    # database to ask what it was that fired.
     assert find_triggered([ABOVE_HIT], PRICES) == [
         {
             "alert_id": 1,
