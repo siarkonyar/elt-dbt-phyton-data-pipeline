@@ -243,6 +243,10 @@ def api_db():
     """db.py does `from queries import ...`, so queries has to be in place."""
     return _load_with_bare_siblings("api", "db", ("queries",))
 
+@pytest.fixture(scope="session")
+def api_config():
+    return _load_service_module("api", "config")
+
 
 # queries before db: db imports it, and a sibling cannot be loaded before
 # the module it depends on.
