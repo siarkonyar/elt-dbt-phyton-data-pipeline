@@ -247,6 +247,11 @@ def api_db():
 def api_config():
     return _load_service_module("api", "config")
 
+@pytest.fixture(scope="session")
+def api_passwords():
+    """Imports bcrypt and nothing of its own, so no siblings are needed."""
+    return _load_service_module("api", "passwords")
+
 
 # queries before db: db imports it, and a sibling cannot be loaded before
 # the module it depends on.
