@@ -17,3 +17,9 @@ def hash_password(password, rounds=BCRYPT_ROUNDS):
     hashed_password = bcrypt.hashpw(encoded_password, salt).decode()
 
     return hashed_password
+
+def verify_password(password, password_hash):
+    try:
+        return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
+    except ValueError:
+        return False
