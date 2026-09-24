@@ -262,6 +262,12 @@ def api_tokens():
     """Imports PyJWT and nothing of its own, so no siblings are needed."""
     return _load_service_module("api", "tokens")
 
+@pytest.fixture(scope="session")
+def api_auth():
+    """auth.py does `from config import ...` and `from tokens import ...`, so
+    both have to be in place under their bare names before it loads."""
+    return _load_with_bare_siblings("api", "auth", ("config", "tokens"))
+
 @pytest.fixture
 def api_tables(connection, api_db):
     """A connection with the api service's tables already created.
