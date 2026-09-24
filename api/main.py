@@ -9,7 +9,7 @@ import db
 # get_config comes from auth, not config. It is the object the tests override,
 # and importing load_config directly here would open a second path to the
 # settings that no override could reach.
-from auth import get_config
+from auth import get_config, get_current_user
 from passwords import verify_password
 from serialize import candle_to_dict
 from tokens import create_token
@@ -35,8 +35,17 @@ def candles(
     symbol: str = Query(..., min_length=1, max_length=10),
     hours: int = Query(1, ge=1, le=24),
     reader=Depends(get_reader),
+    user=Depends(get_current_user)
 ):
-    return [candle_to_dict(row) for row in reader(symbol.upper(), hours)]
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="user is not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    else:
+        return [candle_to_dict(row) for row in reader(symbol.upper(), hours)]
+
 
 def read_user(username):
     with _engine().connect() as connection:
