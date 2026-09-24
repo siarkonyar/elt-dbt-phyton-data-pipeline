@@ -26,3 +26,10 @@ INSERT_USER_SQL = text(
     RETURNING user_id
   """
 )
+
+DELETE_ALERT_SQL = text(
+  """
+    DELETE FROM price_alerts
+    WHERE alert_id = :alert_id
+  """
+)
