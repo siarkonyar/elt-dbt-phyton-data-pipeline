@@ -257,6 +257,16 @@ def api_tokens():
     """Imports PyJWT and nothing of its own, so no siblings are needed."""
     return _load_service_module("api", "tokens")
 
+@pytest.fixture
+def api_tables(connection, api_db):
+    """A connection with the api service's tables already created.
+
+    Postgres makes DDL transactional, so both the CREATE TABLE and any rows a
+    test inserts vanish when `connection` rolls back.
+    """
+    api_db.apply_schema(connection)
+    return connection
+
 
 # queries before db: db imports it, and a sibling cannot be loaded before
 # the module it depends on.
