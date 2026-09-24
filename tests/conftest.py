@@ -279,9 +279,18 @@ def api_tables(connection, api_db):
     return connection
 
 
-# queries before db: db imports it, and a sibling cannot be loaded before
-# the module it depends on.
-API_BARE_MODULES = ("queries", "serialize", "db")
+# Dependency order, because a sibling cannot be loaded before the module it
+# imports: queries before db, and config plus tokens before auth. main.py
+# imports auth, so auth comes last.
+API_BARE_MODULES = (
+    "queries",
+    "serialize",
+    "config",
+    "passwords",
+    "tokens",
+    "db",
+    "auth",
+)
 
 
 @pytest.fixture(scope="session")

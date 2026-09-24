@@ -28,3 +28,9 @@ def candles(
     reader=Depends(get_reader),
 ):
     return [candle_to_dict(row) for row in reader(symbol.upper(), hours)]
+
+@app.post("/auth/login")
+def login(
+  username,
+  password
+):
