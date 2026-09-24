@@ -12,7 +12,7 @@ GET_CANDLES_SQL = text(
 
 GET_USER_SQL = text(
   """
-    SELECT user_id, username, password_hash, role, updated_at
+    SELECT user_id, username, password_hash, role, created_at
       FROM users
     WHERE username = :username
   """
@@ -22,5 +22,7 @@ INSERT_USER_SQL = text(
   """
     INSERT INTO users (username, password_hash, role)
     VALUES (:username, :password_hash, :role)
+    ON CONFLICT (username) DO NOTHING
+    RETURNING user_id
   """
 )

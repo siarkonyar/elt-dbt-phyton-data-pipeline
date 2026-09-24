@@ -191,8 +191,12 @@ def dashboard_queries():
     return _load_service_module("dashboard", "queries")
 
 
+# users has no foreign keys pointing at it, so no CASCADE is needed. Note this
+# also wipes any admin the api container seeded at startup, so every test that
+# needs a user has to create its own.
 TRUNCATE_SQL = text(
-    "TRUNCATE raw_trades, candles, rollup_runs, price_alerts RESTART IDENTITY"
+    "TRUNCATE raw_trades, candles, rollup_runs, price_alerts, users "
+    "RESTART IDENTITY"
 )
 
 
@@ -202,10 +206,11 @@ def _empty_the_tables(engine):
 
 
 @pytest.fixture
-def e2e_db(engine, rollup_db):
+def e2e_db(engine, rollup_db, api_db):
     with engine.begin() as connection:
         db.apply_schema(connection)          # raw_trades, stream_sessions
-        rollup_db.apply_schema(connection)   # candles, rollup_runs
+        rollup_db.apply_schema(connection)   # candles, rollup_runs, price_alerts
+        api_db.apply_schema(connection)      # users
 
     _empty_the_tables(engine)  # anything a previous test left behind
     yield engine                             # an engine, not a connection
