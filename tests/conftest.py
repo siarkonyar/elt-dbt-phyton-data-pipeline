@@ -252,6 +252,11 @@ def api_passwords():
     """Imports bcrypt and nothing of its own, so no siblings are needed."""
     return _load_service_module("api", "passwords")
 
+@pytest.fixture(scope="session")
+def api_tokens():
+    """Imports PyJWT and nothing of its own, so no siblings are needed."""
+    return _load_service_module("api", "tokens")
+
 
 # queries before db: db imports it, and a sibling cannot be loaded before
 # the module it depends on.
