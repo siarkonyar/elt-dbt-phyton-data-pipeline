@@ -9,3 +9,18 @@ GET_CANDLES_SQL = text(
   ORDER BY minute
   """
 )
+
+GET_USER_SQL = text(
+  """
+    SELECT user_id, username, password_hash, role, updated_at
+      FROM users
+    WHERE username = :username
+  """
+)
+
+INSERT_USER_SQL = text(
+  """
+    INSERT INTO users (username, password_hash, role)
+    VALUES (:username, :password_hash, :role)
+  """
+)
