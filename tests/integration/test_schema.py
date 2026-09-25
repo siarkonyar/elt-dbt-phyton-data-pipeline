@@ -29,3 +29,12 @@ def test_rollup_schema_is_safe_to_apply_twice(connection, rollup_db):
 
     assert "candles" in tables
     assert "rollup_runs" in tables
+
+
+def test_api_schema_is_safe_to_apply_twice(connection, api_db):
+    api_db.apply_schema(connection)
+    api_db.apply_schema(connection)
+
+    tables = table_names(connection)
+
+    assert "users" in tables

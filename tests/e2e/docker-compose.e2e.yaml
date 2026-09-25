@@ -46,6 +46,14 @@ services:
   api:
     environment:
       DESTINATION_POSTGRES_PASSWORD: e2e
+      # CI writes a .env holding only POSTGRES_PASSWORD, so without these the
+      # api dies on ConfigError at startup, depends_on never comes up, and
+      # every e2e test fails with a 120s timeout pointing at the pipeline
+      # instead of at the config.
+      JWT_SECRET: an-e2e-secret-that-is-at-least-thirty-two-characters
+      JWT_EXPIRY_SECONDS: 3600
+      API_ADMIN_USERNAME: admin
+      API_ADMIN_PASSWORD: e2e-admin-password
     ports: !override
       - '8000'
 

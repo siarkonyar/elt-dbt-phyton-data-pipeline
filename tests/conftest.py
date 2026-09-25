@@ -191,8 +191,18 @@ def dashboard_queries():
     return _load_service_module("dashboard", "queries")
 
 
+@pytest.fixture(scope="session")
+def dashboard_auth():
+    """Imports requests and nothing of its own, so no siblings are needed."""
+    return _load_service_module("dashboard", "auth")
+
+
+# users has no foreign keys pointing at it, so no CASCADE is needed. Note this
+# also wipes any admin the api container seeded at startup, so every test that
+# needs a user has to create its own.
 TRUNCATE_SQL = text(
-    "TRUNCATE raw_trades, candles, rollup_runs, price_alerts RESTART IDENTITY"
+    "TRUNCATE raw_trades, candles, rollup_runs, price_alerts, users "
+    "RESTART IDENTITY"
 )
 
 
@@ -202,10 +212,11 @@ def _empty_the_tables(engine):
 
 
 @pytest.fixture
-def e2e_db(engine, rollup_db):
+def e2e_db(engine, rollup_db, api_db):
     with engine.begin() as connection:
         db.apply_schema(connection)          # raw_trades, stream_sessions
-        rollup_db.apply_schema(connection)   # candles, rollup_runs
+        rollup_db.apply_schema(connection)   # candles, rollup_runs, price_alerts
+        api_db.apply_schema(connection)      # users
 
     _empty_the_tables(engine)  # anything a previous test left behind
     yield engine                             # an engine, not a connection
@@ -243,10 +254,49 @@ def api_db():
     """db.py does `from queries import ...`, so queries has to be in place."""
     return _load_with_bare_siblings("api", "db", ("queries",))
 
+@pytest.fixture(scope="session")
+def api_config():
+    return _load_service_module("api", "config")
 
-# queries before db: db imports it, and a sibling cannot be loaded before
-# the module it depends on.
-API_BARE_MODULES = ("queries", "serialize", "db")
+@pytest.fixture(scope="session")
+def api_passwords():
+    """Imports bcrypt and nothing of its own, so no siblings are needed."""
+    return _load_service_module("api", "passwords")
+
+@pytest.fixture(scope="session")
+def api_tokens():
+    """Imports PyJWT and nothing of its own, so no siblings are needed."""
+    return _load_service_module("api", "tokens")
+
+@pytest.fixture(scope="session")
+def api_auth():
+    """auth.py does `from config import ...` and `from tokens import ...`, so
+    both have to be in place under their bare names before it loads."""
+    return _load_with_bare_siblings("api", "auth", ("config", "tokens"))
+
+@pytest.fixture
+def api_tables(connection, api_db):
+    """A connection with the api service's tables already created.
+
+    Postgres makes DDL transactional, so both the CREATE TABLE and any rows a
+    test inserts vanish when `connection` rolls back.
+    """
+    api_db.apply_schema(connection)
+    return connection
+
+
+# Dependency order, because a sibling cannot be loaded before the module it
+# imports: queries before db, and config plus tokens before auth. main.py
+# imports auth, so auth comes last.
+API_BARE_MODULES = (
+    "queries",
+    "serialize",
+    "config",
+    "passwords",
+    "tokens",
+    "db",
+    "auth",
+)
 
 
 @pytest.fixture(scope="session")

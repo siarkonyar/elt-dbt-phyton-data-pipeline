@@ -19,7 +19,6 @@ OTHER_CANDLES_SQL = text("SELECT count(*) FROM candles WHERE symbol = :symbol")
 STREAM_TRADES_SQL = text("SELECT sum(trades_received) FROM stream_sessions")
 ROLLUP_OK_SQL = text("SELECT count(*) FROM rollup_runs WHERE status = 'ok'")
 
-API_PORT = 8000
 API_TIMEOUT_SECONDS = 10
 
 # Below the price NVDA closes the minute at, so the very next rollup pass
@@ -33,11 +32,6 @@ NEW_ALERT_SQL = text(
     RETURNING alert_id
     """
 )
-
-def api_url(compose, path):
-    host = compose.get_service_host("api", API_PORT)
-    port = compose.get_service_port("api", API_PORT)
-    return f"http://{host}:{port}{path}"
 
 #this is written here because we want to call the nvidia candle
 #only once throughout this session.
@@ -115,15 +109,16 @@ def test_dashboard_image_answers_health_check(nvda_candle, compose):
 
     assert response.status_code == 200
 
-def test_api_image_answers_health_check(nvda_candle, compose):
-    response = requests.get(api_url(compose, "/health"), timeout=API_TIMEOUT_SECONDS,)
+def test_api_image_answers_health_check(nvda_candle, api_url):
+    response = requests.get(api_url("/health"), timeout=API_TIMEOUT_SECONDS,)
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
 
-def test_api_serves_the_candle_over_http(nvda_candle, compose):
-    response = requests.get(api_url(compose, "/candles"),
+def test_api_serves_the_candle_over_http(nvda_candle, api_url, admin_headers):
+    response = requests.get(api_url("/candles"),
                             params={"symbol": SYMBOL, "hours": CANDLE_WINDOW_HOURS},
+                            headers=admin_headers,
                             timeout=API_TIMEOUT_SECONDS,)
 
     assert response.status_code == 200
@@ -158,3 +153,99 @@ def test_the_rollup_container_fires_a_users_alert(
     alert = wait_for_triggered_alert(alert_id)
 
     assert float(alert.triggered_price) == float(nvda_candle.close)
+
+
+# ------------------------------------------------------------------ auth, over HTTP
+
+READ_ALERT_SQL = text("SELECT alert_id FROM price_alerts WHERE alert_id = :alert_id")
+
+# High enough that the rollup will never fire it, so deleting it is the only
+# thing that ever happens to this row.
+UNREACHABLE_THRESHOLD = 999999.0
+
+
+def make_alert(engine, symbol=OTHER_SYMBOL, threshold=UNREACHABLE_THRESHOLD):
+    with engine.begin() as connection:
+        return connection.execute(
+            NEW_ALERT_SQL, {"symbol": symbol, "threshold": threshold}
+        ).scalar_one()
+
+
+def test_the_api_refuses_a_candle_request_with_no_token(api_url):
+    """The container really is closed, not just the TestClient in the unit
+    tier. Nothing here is stubbed: real image, real token check."""
+    response = requests.get(
+        api_url("/candles"),
+        params={"symbol": SYMBOL},
+        timeout=API_TIMEOUT_SECONDS,
+    )
+
+    assert response.status_code == 401
+
+
+def test_the_api_hands_out_a_token_for_the_seeded_admin(admin_token):
+    """The admin exists at all, which means the lifespan ran inside the real
+    container - schema applied and the row seeded from the compose env."""
+    assert admin_token
+
+
+def test_the_api_refuses_the_seeded_admin_with_a_wrong_password(api_url):
+    response = requests.post(
+        api_url("/auth/login"),
+        json={"username": "admin", "password": "not-the-password"},
+        timeout=API_TIMEOUT_SECONDS,
+    )
+
+    assert response.status_code == 401
+
+
+def test_a_registered_user_may_read_the_candles(nvda_candle, api_url, user_headers):
+    """Reading is not an admin power, so a self-registered account is enough."""
+    response = requests.get(
+        api_url("/candles"),
+        params={"symbol": SYMBOL, "hours": CANDLE_WINDOW_HOURS},
+        headers=user_headers,
+        timeout=API_TIMEOUT_SECONDS,
+    )
+
+    assert response.status_code == 200
+
+
+def test_a_registered_user_may_not_delete_an_alert(e2e_engine, api_url, user_headers):
+    """403, and the row is still there afterwards. Checking only the status
+    would pass against a route that answered 403 and deleted it anyway."""
+    alert_id = make_alert(e2e_engine)
+
+    response = requests.delete(
+        api_url(f"/alerts/{alert_id}"),
+        headers=user_headers,
+        timeout=API_TIMEOUT_SECONDS,
+    )
+
+    assert response.status_code == 403
+
+    with e2e_engine.connect() as connection:
+        survivor = connection.execute(READ_ALERT_SQL, {"alert_id": alert_id}).one()
+
+    assert survivor.alert_id == alert_id
+
+
+def test_an_admin_deletes_an_alert_over_http(e2e_engine, api_url, admin_headers):
+    """The payoff. HTTP in, SQL out: the 204 only proves the api said yes, so
+    the row being gone from Postgres is what proves it happened."""
+    alert_id = make_alert(e2e_engine)
+
+    response = requests.delete(
+        api_url(f"/alerts/{alert_id}"),
+        headers=admin_headers,
+        timeout=API_TIMEOUT_SECONDS,
+    )
+
+    assert response.status_code == 204
+
+    with e2e_engine.connect() as connection:
+        remaining = connection.execute(
+            READ_ALERT_SQL, {"alert_id": alert_id}
+        ).one_or_none()
+
+    assert remaining is None

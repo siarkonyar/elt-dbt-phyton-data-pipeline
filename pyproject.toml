@@ -8,9 +8,10 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["rollup", "stream", "api"]
+source = ["rollup", "stream", "api", "dashboard"]
 omit = [
     "stream/main.py",   # an infinite loop; covering it proves little
+    "dashboard/app.py", # a Streamlit script; importing it renders a page
 ]
 
 [tool.coverage.report]
@@ -30,4 +31,4 @@ select = ["E", "F", "W", "I", "B", "UP"]
 # FastAPI declares dependencies and query rules as argument defaults - that is
 # the framework's documented style, not the mutable-default bug B008 hunts for.
 [tool.ruff.lint.flake8-bugbear]
-extend-immutable-calls = ["fastapi.Depends", "fastapi.Query"]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Header"]

@@ -4,6 +4,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+import auth
 from db import get_destination_engine, table_exists
 from queries import (
     ALERTS_SQL,
@@ -22,6 +23,15 @@ REFRESH = "1s"
 CANDLE_REFRESH = "30s"
 HISTORY_HOURS = int(os.environ.get("HISTORY_HOURS", "24"))
 STALE_AFTER_SECONDS = float(os.environ.get("STALE_AFTER_SECONDS", "90"))
+# Inside the compose network the service name resolves; there is no
+# dashboard/config.py and two variables do not justify inventing one.
+API_BASE_URL = os.environ.get("API_BASE_URL", "http://api:8000")
+API_TIMEOUT_SECONDS = float(os.environ.get("API_TIMEOUT_SECONDS", "10"))
+
+# st.rerun() restarts the script, so anything written with st.success or
+# st.error just before it is thrown away. The outcome goes here instead and
+# is drawn on the next run, once.
+FEEDBACK_KEY = "feedback"
 HISTORY_CACHE_TTL = 30
 CANDLE_LAG_GRACE_SECONDS = 300
 
@@ -369,6 +379,175 @@ def render_alert_list(engine):
     )
 
 
+@st.cache_resource
+def api_session():
+    return auth.build_session()
+
+
+def sign_out():
+    for key in ("token", "role", "username"):
+        st.session_state.pop(key, None)
+
+
+def render_login():
+    st.subheader("Sign in")
+
+    with st.form("login"):
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        submitted = st.form_submit_button("Sign in")
+
+    if not submitted:
+        return
+
+    try:
+        credentials = auth.login(
+            api_session(), API_BASE_URL, username, password, API_TIMEOUT_SECONDS
+        )
+    except auth.AuthError as error:
+        st.error(str(error))
+        return
+    except Exception as error:
+        # A dead api is not a credentials problem. Saying "wrong password" here
+        # would send someone round a loop retyping a correct one.
+        st.error(f"Cannot reach the api - {error}")
+        return
+
+    # Lower-cased to match what the api stored, so the sidebar shows the name
+    # the account actually has.
+    st.session_state["token"] = credentials.token
+    st.session_state["role"] = credentials.role
+    st.session_state["username"] = username.strip().lower()
+    st.rerun()
+
+
+def render_register():
+    st.caption(
+        "New accounts are always plain users. Only an admin can delete alerts."
+    )
+
+    with st.form("register"):
+        # max_chars mirrors the api's RegisterRequest, so an over-long entry is
+        # refused here rather than coming back as an opaque 422.
+        username = st.text_input("Choose a username", max_chars=64)
+        password = st.text_input("Choose a password", type="password", max_chars=72)
+        submitted = st.form_submit_button("Create account")
+
+    if not submitted:
+        return
+
+    if not username.strip() or not password:
+        st.error("Enter a username and a password.")
+        return
+
+    try:
+        created = auth.register(
+            api_session(), API_BASE_URL, username, password, API_TIMEOUT_SECONDS
+        )
+    except Exception as error:
+        st.error(f"Cannot reach the api - {error}")
+        return
+
+    if created:
+        st.success("Account created. Sign in on the other tab.")
+    else:
+        # Not an error the api treats as a failure of yours - just pick another.
+        st.error("That username is already taken.")
+
+
+def remember_feedback(kind, message):
+    st.session_state[FEEDBACK_KEY] = (kind, message)
+
+
+def render_feedback():
+    """Draw whatever the last action left behind, then forget it.
+
+    Called before the login gate so a message survives being signed out - an
+    expired session would otherwise bounce someone to the form with no
+    explanation at all.
+    """
+    remembered = st.session_state.pop(FEEDBACK_KEY, None)
+
+    if remembered is None:
+        return
+
+    kind, message = remembered
+
+    if kind == "success":
+        st.success(message)
+    elif kind == "info":
+        st.info(message)
+    else:
+        st.error(message)
+
+
+def render_sidebar():
+    with st.sidebar:
+        st.write(
+            f"Signed in as **{st.session_state['username']}** "
+            f"({st.session_state['role']})"
+        )
+
+        if st.button("Log out"):
+            sign_out()
+            st.rerun()
+
+
+def render_delete_alert(engine):
+    alerts = load_alerts(engine)
+
+    if alerts.empty:
+        return
+
+    # Shown to everyone on purpose. Hiding the control from a plain user would
+    # be cosmetic: the api re-reads the role from the token on every delete, and
+    # that refusal is what actually enforces it. Letting them press it means the
+    # rule is demonstrated rather than merely assumed.
+    st.caption("Deleting an alert needs an admin account.")
+
+    with st.form("delete-alert", clear_on_submit=True):
+        alert_id = st.selectbox(
+            "Delete an alert", alerts["alert_id"], format_func=lambda row: f"#{row}"
+        )
+        submitted = st.form_submit_button("Delete alert")
+
+    if not submitted:
+        return
+
+    try:
+        removed = auth.delete_alert(
+            api_session(),
+            API_BASE_URL,
+            st.session_state["token"],
+            int(alert_id),
+            API_TIMEOUT_SECONDS,
+        )
+    except auth.NotAllowedError as error:
+        # Caught before AuthError, because it is a subclass and Python takes the
+        # first matching branch. Signed in correctly, just not an admin - so no
+        # rerun and no sign out, and the message stays on screen.
+        st.error(str(error))
+        return
+    except auth.AuthError as error:
+        # 401: the session itself is dead, so there is nothing to stay on.
+        remember_feedback("error", f"{error} You have been signed out.")
+        sign_out()
+        st.rerun()
+    except Exception as error:
+        # Covers both a dead api and one that answered with a 5xx, so the
+        # wording does not claim to know which.
+        st.error(f"Could not delete alert #{alert_id} - {error}")
+        return
+
+    if removed:
+        remember_feedback("success", f"Alert #{alert_id} deleted.")
+    else:
+        # Someone else got there first. Ordinary, so not an error.
+        remember_feedback("info", f"Alert #{alert_id} was already gone.")
+
+    st.rerun()
+
+
 engine = get_destination_engine()
 
 st.title("Live trades")
@@ -387,6 +566,22 @@ except Exception as error:
 if not table_exists(engine, "raw_trades"):
     st.warning("`raw_trades` does not exist yet - start the `stream` service.")
     st.stop()
+
+
+render_feedback()
+
+if "token" not in st.session_state:
+    sign_in_tab, register_tab = st.tabs(["Sign in", "Register"])
+
+    with sign_in_tab:
+        render_login()
+
+    with register_tab:
+        render_register()
+
+    st.stop()
+
+render_sidebar()
 
 
 # Only this block re-runs on the timer, so the page does not flicker.
@@ -457,4 +652,5 @@ def alerts():
 live()
 history()
 render_alert_form(engine)
+render_delete_alert(engine)
 alerts()

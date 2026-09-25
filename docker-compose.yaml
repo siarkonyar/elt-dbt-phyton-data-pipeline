@@ -84,6 +84,9 @@ services:
     depends_on:
       destination_postgres:
         condition: service_healthy
+      # The dashboard's first login would otherwise race the api's startup.
+      api:
+        condition: service_started
 
 volumes:
   destination_data:

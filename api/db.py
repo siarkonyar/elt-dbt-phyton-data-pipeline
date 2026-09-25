@@ -1,9 +1,11 @@
 import os
+from pathlib import Path
 
 from sqlalchemy import create_engine
 
-from queries import GET_CANDLES_SQL
+from queries import DELETE_ALERT_SQL, GET_CANDLES_SQL, GET_USER_SQL, INSERT_USER_SQL
 
+SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
 def get_engine(env=None):
     env = os.environ if env is None else env
@@ -28,3 +30,24 @@ def read_candles(engine, symbol, hours):
         return connection.execute(
             GET_CANDLES_SQL, {"symbol": symbol, "hours": hours}
         ).all()
+
+def apply_schema(connection):
+    """Run the CREATE TABLE IF NOT EXISTS statements in schema.sql."""
+    connection.exec_driver_sql(SCHEMA_PATH.read_text(encoding="utf-8"))
+
+def read_user(connection, username):
+    return connection.execute(
+        GET_USER_SQL, {"username": username}
+    ).one_or_none()
+
+def create_user(connection, username, password_hash, role):
+    return connection.execute(
+        INSERT_USER_SQL,
+        {"username": username, "password_hash": password_hash, "role": role},
+    ).scalar()
+
+def delete_alert(connection, alert_id):
+    return connection.execute(
+        DELETE_ALERT_SQL,
+        {"alert_id": alert_id},
+    ).rowcount
