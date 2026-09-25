@@ -85,7 +85,8 @@ def candles(
     symbol: str = Query(..., min_length=1, max_length=10),
     hours: int = Query(1, ge=1, le=24),
     reader=Depends(get_reader),
-    user: AuthenticatedUser=Depends(get_current_user)#this already raises an error if the user is not authenticated
+    #this already raises an error if the user is not authenticated
+    user: AuthenticatedUser=Depends(get_current_user)
 ):
     return [candle_to_dict(row) for row in reader(symbol.upper(), hours)]
 
@@ -175,7 +176,8 @@ def get_alert_deleter():
 def remove_alert(
     alert_id: int,
     deleter=Depends(get_alert_deleter),
-    user: AuthenticatedUser = Depends(require_admin),#this already raises an error if the user is not authenticated
+    #this already raises an error if the user is not authenticated
+    user: AuthenticatedUser = Depends(require_admin),
 ):
     if deleter(alert_id) == 0:
         raise HTTPException(

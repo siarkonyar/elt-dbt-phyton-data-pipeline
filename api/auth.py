@@ -24,7 +24,8 @@ def parse_bearer(header):
 
     if len(parts) != 2:
         return None
-    #Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhZGEifQ.xK3p -- we split because the auth comes like this
+    #Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhZGEifQ.xK3p
+    #-- we split because the auth comes like this
 
     scheme, token = parts
 
