@@ -185,3 +185,86 @@ def test_an_expired_token_on_delete_raises_an_auth_error(dashboard_auth):
 
     with pytest.raises(dashboard_auth.AuthError):
         do_delete(dashboard_auth, session)
+
+
+def do_register(dashboard_auth, session, base_url=BASE_URL):
+    return dashboard_auth.register(session, base_url, USERNAME, PASSWORD, TIMEOUT)
+
+
+def test_register_posts_the_username_and_password_to_the_register_path(dashboard_auth):
+    session = FakeSession(
+        FakeResponse(status_code=201, payload={"username": USERNAME, "role": "user"})
+    )
+
+    do_register(dashboard_auth, session)
+
+    sent = session.requests[0]
+    assert sent["url"] == f"{BASE_URL}{dashboard_auth.REGISTER_PATH}"
+    assert sent["json"] == {"username": USERNAME, "password": PASSWORD}
+
+
+def test_register_sends_the_configured_timeout(dashboard_auth):
+    session = FakeSession(FakeResponse(status_code=201, payload={}))
+
+    do_register(dashboard_auth, session)
+
+    assert session.requests[0]["timeout"] == TIMEOUT
+
+
+def test_a_created_account_reports_success(dashboard_auth):
+    session = FakeSession(
+        FakeResponse(status_code=201, payload={"username": USERNAME, "role": "user"})
+    )
+
+    assert do_register(dashboard_auth, session) is True
+
+
+def test_a_username_that_is_taken_reports_failure(dashboard_auth):
+    """False, not an exception, and not an AuthError.
+
+    A taken username is not a credentials problem - nobody's session is wrong.
+    It is an ordinary outcome the form can report so the person picks another
+    name, which is the same shape as delete_alert's 404.
+    """
+    session = FakeSession(
+        FakeResponse(status_code=409, error=requests.HTTPError("409 Conflict"))
+    )
+
+    assert do_register(dashboard_auth, session) is False
+
+
+def test_a_server_failure_during_register_reaches_the_caller(dashboard_auth):
+    session = FakeSession(
+        FakeResponse(status_code=500, error=requests.HTTPError("500 Server Error"))
+    )
+
+    with pytest.raises(requests.HTTPError):
+        do_register(dashboard_auth, session)
+
+
+def test_a_forbidden_delete_reports_a_permission_problem(dashboard_auth):
+    """403 gets its own type, because it needs different handling from 401.
+
+    The delete control is shown to everyone, so a plain user pressing it is an
+    ordinary thing to do. They are signed in correctly and must stay signed in
+    - only the answer is no.
+    """
+    session = FakeSession(
+        FakeResponse(status_code=403, error=requests.HTTPError("403 Forbidden"))
+    )
+
+    with pytest.raises(dashboard_auth.NotAllowedError):
+        do_delete(dashboard_auth, session)
+
+
+def test_an_expired_token_is_not_reported_as_a_permission_problem(dashboard_auth):
+    """The other half: a 401 must NOT look like a permission problem, or the
+    page would leave someone clicking a dead session forever."""
+    session = FakeSession(
+        FakeResponse(status_code=401, error=requests.HTTPError("401 Unauthorized"))
+    )
+
+    with pytest.raises(dashboard_auth.AuthError) as caught:
+        do_delete(dashboard_auth, session)
+
+    assert not isinstance(caught.value, dashboard_auth.NotAllowedError)
