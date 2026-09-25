@@ -40,27 +40,40 @@ jobs:
   # service-tests.yml: that container's unit job, then its integration job. The
   # four lanes run side by side, and a lane only runs tests/<level>/<service>,
   # so the folder a test lives in decides its lane.
-  tests:
-    name: ${{ matrix.service }}
+  #
+  # These are four plain jobs rather than one matrix on purpose: the Actions
+  # graph folds a matrix into a single "Matrix" box, while separate jobs each
+  # get their own box, so the four lanes are visible at a glance.
+  api:
     needs: lint
-
-    strategy:
-      # One broken container should not cancel the other lanes - we want to
-      # see every failure in a single run.
-      fail-fast: false
-      matrix:
-        service: [api, dashboard, rollup, stream]
-
     uses: ./.github/workflows/service-tests.yml
     with:
-      service: ${{ matrix.service }}
+      service: api
 
-  # The fan-in point. `needs` on a matrix job waits for every copy of it, so
-  # e2e starts only after all four lanes have finished unit and integration.
+  dashboard:
+    needs: lint
+    uses: ./.github/workflows/service-tests.yml
+    with:
+      service: dashboard
+
+  rollup:
+    needs: lint
+    uses: ./.github/workflows/service-tests.yml
+    with:
+      service: rollup
+
+  stream:
+    needs: lint
+    uses: ./.github/workflows/service-tests.yml
+    with:
+      service: stream
+
+  # The fan-in point: e2e starts only after all four lanes have finished
+  # unit and integration.
   e2e:
     name: e2e
     runs-on: ubuntu-latest
-    needs: tests
+    needs: [api, dashboard, rollup, stream]
     timeout-minutes: 20
 
     steps:
