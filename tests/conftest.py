@@ -191,6 +191,12 @@ def dashboard_queries():
     return _load_service_module("dashboard", "queries")
 
 
+@pytest.fixture(scope="session")
+def dashboard_auth():
+    """Imports requests and nothing of its own, so no siblings are needed."""
+    return _load_service_module("dashboard", "auth")
+
+
 # users has no foreign keys pointing at it, so no CASCADE is needed. Note this
 # also wipes any admin the api container seeded at startup, so every test that
 # needs a user has to create its own.

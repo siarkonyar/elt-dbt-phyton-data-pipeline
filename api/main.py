@@ -9,9 +9,6 @@ from sqlalchemy.exc import SQLAlchemyError
 
 import db
 
-# get_config comes from auth, not config. It is the object the tests override,
-# and importing load_config directly here would open a second path to the
-# settings that no override could reach.
 from auth import (
     ADMIN_ROLE,
     AuthenticatedUser,
@@ -24,27 +21,16 @@ from passwords import hash_password, verify_password
 from serialize import candle_to_dict
 from tokens import create_token
 
-# Registration never reads a role from the request body. Hardcoding it here is
-# the difference between an open signup form and privilege escalation.
 NEW_USER_ROLE = "user"
 
 
 def prepare_database(connection, config):
-    """Create the tables, then seed the admin if one is configured.
-
-    Takes a connection, not an engine, so an integration test can drive it on
-    the rollback fixture and have the schema and the seeded row both undone.
-    """
     db.apply_schema(connection)
 
     if not config.admin_username or not config.admin_password:
         print("no seed admin configured", file=sys.stderr)
         return
 
-    # Lower-cased for the same reason login() lower-cases. Postgres stores
-    # usernames case-sensitively, so a seeded "Admin" would exist and yet be
-    # unreachable - which looks exactly like a wrong password, with nothing in
-    # any log to say otherwise.
     db.create_user(
         connection,
         username=config.admin_username.strip().lower(),
@@ -100,9 +86,7 @@ def candles(
     symbol: str = Query(..., min_length=1, max_length=10),
     hours: int = Query(1, ge=1, le=24),
     reader=Depends(get_reader),
-    # get_current_user raises 401 itself, so reaching this body means the
-    # caller is known. The parameter only puts it in the dependency chain.
-    user: AuthenticatedUser = Depends(get_current_user),
+    user: AuthenticatedUser=Depends(get_current_user)#this already raises an error if the user is not authenticated
 ):
     return [candle_to_dict(row) for row in reader(symbol.upper(), hours)]
 
@@ -149,9 +133,6 @@ def login(
     return {"access_token": token, "token_type": "bearer", "role": user.role}
 
 def create_user(username, hashed_password, role=NEW_USER_ROLE):
-    # _engine() - it is a function, not an engine. And .begin(), not
-    # .connect(): a write needs a transaction that commits, or the row
-    # silently never lands.
     with _engine().begin() as connection:
         return db.create_user(
             connection,
@@ -168,8 +149,6 @@ def register(
     credentials: RegisterRequest,
     user_creator=Depends(get_user_creator),
 ):
-    # Lower-cased to match the lookup in login(). If the two disagreed, an
-    # account would be unreachable the moment it was created.
     username = credentials.username.strip().lower()
     password = credentials.password
 
@@ -197,9 +176,7 @@ def get_alert_deleter():
 def remove_alert(
     alert_id: int,
     deleter=Depends(get_alert_deleter),
-    # require_admin raises 403 itself, before this body runs - so a plain
-    # user never reaches the deleter at all.
-    user: AuthenticatedUser = Depends(require_admin),
+    user: AuthenticatedUser = Depends(require_admin),#this already raises an error if the user is not authenticated
 ):
     if deleter(alert_id) == 0:
         raise HTTPException(
