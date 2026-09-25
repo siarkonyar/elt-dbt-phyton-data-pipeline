@@ -8,7 +8,6 @@ from pydantic import BaseModel, Field
 from sqlalchemy.exc import SQLAlchemyError
 
 import db
-
 from auth import (
     ADMIN_ROLE,
     AuthenticatedUser,

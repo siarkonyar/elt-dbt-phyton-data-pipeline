@@ -8,9 +8,10 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["rollup", "stream", "api"]
+source = ["rollup", "stream", "api", "dashboard"]
 omit = [
     "stream/main.py",   # an infinite loop; covering it proves little
+    "dashboard/app.py", # a Streamlit script; importing it renders a page
 ]
 
 [tool.coverage.report]
