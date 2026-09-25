@@ -36,135 +36,31 @@ jobs:
       - name: Lint
         run: ruff check . --output-format=github
 
-  unit:
-    name: unit
-    runs-on: ubuntu-latest
+  # After ruff the pipeline fans out into one lane per container. Each lane is
+  # service-tests.yml: that container's unit job, then its integration job. The
+  # four lanes run side by side, and a lane only runs tests/<level>/<service>,
+  # so the folder a test lives in decides its lane.
+  tests:
+    name: ${{ matrix.service }}
     needs: lint
 
-    steps:
-      - uses: actions/checkout@v4
+    strategy:
+      # One broken container should not cancel the other lanes - we want to
+      # see every failure in a single run.
+      fail-fast: false
+      matrix:
+        service: [api, dashboard, rollup, stream]
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: pip
-          cache-dependency-path: requirements-dev.txt
+    uses: ./.github/workflows/service-tests.yml
+    with:
+      service: ${{ matrix.service }}
 
-      - name: Install dependencies
-        run: pip install -r requirements-dev.txt
-
-      - name: Run tests
-        run: >-
-          pytest -m "not integration and not e2e" -v -rA --durations=10
-          --cov --junitxml=reports/unit-junit.xml
-
-      - name: Publish test results
-        uses: EnricoMi/publish-unit-test-result-action@v2
-        if: always()
-        with:
-          check_name: unit test results
-          files: reports/*.xml
-          report_individual_runs: true
-          report_suite_logs: any
-
-      # These run after the action so its counts table stays at the top of the
-      # job summary and our detail lands underneath it.
-      - name: Coverage line
-        if: always()
-        run: |
-          if total=$(coverage report --format=total); then
-            echo "**unit coverage: ${total}%**" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "_unit coverage unavailable_" >> "$GITHUB_STEP_SUMMARY"
-          fi
-
-      - name: Test detail
-        if: always()
-        run: >-
-          python scripts/test_summary.py reports/unit-junit.xml unit
-          >> "$GITHUB_STEP_SUMMARY"
-
-  integration:
-    name: integration
-    runs-on: ubuntu-latest
-    needs: unit
-
-    services:
-      postgres:
-        image: postgres:13
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: test_db
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres -d test_db"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 20
-
-    env:
-      TEST_DATABASE_URL: postgresql+psycopg2://postgres:postgres@localhost:5432/test_db
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: pip
-          cache-dependency-path: requirements-dev.txt
-
-      - name: Install dependencies
-        run: pip install -r requirements-dev.txt
-
-      - name: Fail fast if the test database is unreachable
-        run: |
-          python - <<'PY'
-          import os
-
-          from sqlalchemy import create_engine, text
-
-          engine = create_engine(os.environ["TEST_DATABASE_URL"])
-          with engine.connect() as connection:
-              connection.execute(text("SELECT 1"))
-          print("test database reachable")
-          PY
-
-      - name: Run tests
-        run: >-
-          pytest -m "integration" -v -rA --durations=10
-          --cov --junitxml=reports/integration-junit.xml
-
-      - name: Publish test results
-        uses: EnricoMi/publish-unit-test-result-action@v2
-        if: always()
-        with:
-          check_name: integration test results
-          files: reports/*.xml
-          report_individual_runs: true
-          report_suite_logs: any
-
-      - name: Coverage line
-        if: always()
-        run: |
-          if total=$(coverage report --format=total); then
-            echo "**integration coverage: ${total}%**" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "_integration coverage unavailable_" >> "$GITHUB_STEP_SUMMARY"
-          fi
-
-      - name: Test detail
-        if: always()
-        run: >-
-          python scripts/test_summary.py reports/integration-junit.xml integration
-          >> "$GITHUB_STEP_SUMMARY"
-
+  # The fan-in point. `needs` on a matrix job waits for every copy of it, so
+  # e2e starts only after all four lanes have finished unit and integration.
   e2e:
     name: e2e
     runs-on: ubuntu-latest
-    needs: integration
+    needs: tests
     timeout-minutes: 20
 
     steps:

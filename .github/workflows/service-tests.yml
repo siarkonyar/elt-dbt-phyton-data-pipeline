@@ -1,0 +1,149 @@
+name: service tests
+
+# One container's lane: unit, then integration. ci.yml calls this once per
+# container, so every container gets its own unit -> integration chain and the
+# four chains run side by side. It never runs on its own.
+on:
+  workflow_call:
+    inputs:
+      service:
+        description: Container folder to test - api, dashboard, rollup or stream
+        required: true
+        type: string
+
+# A called workflow does not see the caller's top-level env, so it is set again.
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  unit:
+    name: unit
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      # --cov=<service> narrows coverage to this container's own code, so the
+      # number means "how much of api/ did api's tests touch".
+      - name: Run tests
+        run: >-
+          pytest tests/unit/${{ inputs.service }} -v -rA --durations=10
+          --cov=${{ inputs.service }}
+          --junitxml=reports/${{ inputs.service }}-unit-junit.xml
+
+      - name: Publish test results
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        if: always()
+        with:
+          check_name: ${{ inputs.service }} unit test results
+          files: reports/*.xml
+          report_individual_runs: true
+          report_suite_logs: any
+
+      # These run after the action so its counts table stays at the top of the
+      # job summary and our detail lands underneath it.
+      - name: Coverage line
+        if: always()
+        run: |
+          if total=$(coverage report --format=total); then
+            echo "**${{ inputs.service }} unit coverage: ${total}%**" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "_${{ inputs.service }} unit coverage unavailable_" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Test detail
+        if: always()
+        run: >-
+          python scripts/test_summary.py
+          reports/${{ inputs.service }}-unit-junit.xml "${{ inputs.service }} unit"
+          >> "$GITHUB_STEP_SUMMARY"
+
+  # Waits only for this container's unit job, not for the other lanes.
+  integration:
+    name: integration
+    runs-on: ubuntu-latest
+    needs: unit
+
+    services:
+      postgres:
+        image: postgres:13
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d test_db"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+
+    env:
+      TEST_DATABASE_URL: postgresql+psycopg2://postgres:postgres@localhost:5432/test_db
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Fail fast if the test database is unreachable
+        run: |
+          python - <<'PY'
+          import os
+
+          from sqlalchemy import create_engine, text
+
+          engine = create_engine(os.environ["TEST_DATABASE_URL"])
+          with engine.connect() as connection:
+              connection.execute(text("SELECT 1"))
+          print("test database reachable")
+          PY
+
+      - name: Run tests
+        run: >-
+          pytest tests/integration/${{ inputs.service }} -v -rA --durations=10
+          --cov=${{ inputs.service }}
+          --junitxml=reports/${{ inputs.service }}-integration-junit.xml
+
+      - name: Publish test results
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        if: always()
+        with:
+          check_name: ${{ inputs.service }} integration test results
+          files: reports/*.xml
+          report_individual_runs: true
+          report_suite_logs: any
+
+      - name: Coverage line
+        if: always()
+        run: |
+          if total=$(coverage report --format=total); then
+            echo "**${{ inputs.service }} integration coverage: ${total}%**" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "_${{ inputs.service }} integration coverage unavailable_" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Test detail
+        if: always()
+        run: >-
+          python scripts/test_summary.py
+          reports/${{ inputs.service }}-integration-junit.xml
+          "${{ inputs.service }} integration"
+          >> "$GITHUB_STEP_SUMMARY"
