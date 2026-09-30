@@ -70,3 +70,24 @@ def finish_session(connection, session_id, status, error_message=None):
             "error_message": error_message,
         },
     )
+
+# The trade's own time, not now(): the flush runs up to a second after the
+# trade, and the alert should say when the price crossed. triggered_at IS NULL
+# means an alert fires once and is never overwritten by a later trade.
+MARK_TRIGGERED_SQL = text(
+    """
+    UPDATE price_alerts
+       SET triggered_at    = :trade_ts,
+           triggered_price = :price
+     WHERE alert_id = :alert_id
+       AND triggered_at IS NULL
+    """
+)
+
+def mark_triggered(connection, fired):
+    """One round trip for every alert the batch set off. Returns how many."""
+    if not fired:
+        return 0
+
+    connection.execute(MARK_TRIGGERED_SQL, list(fired))
+    return len(fired)
