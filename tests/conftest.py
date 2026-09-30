@@ -138,11 +138,6 @@ def rollup_writer():
     return _load_service_module("rollup", "writer")
 
 @pytest.fixture(scope="session")
-def rollup_alerts():
-    return _load_service_module("rollup", "alerts")
-
-
-@pytest.fixture(scope="session")
 def rollup_db():
     return _load_service_module("rollup", "db")
 
@@ -176,7 +171,7 @@ def _load_with_bare_siblings(service, module_name, siblings):
                 sys.modules[name] = module
 
 
-ROLLUP_BARE_MODULES = ("candles", "config", "db", "writer", "alerts")
+ROLLUP_BARE_MODULES = ("candles", "config", "db", "writer")
 
 
 @pytest.fixture(scope="session")
