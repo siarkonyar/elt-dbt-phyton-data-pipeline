@@ -24,7 +24,7 @@ def alert_to_dict(row):
     """triggered_at and triggered_price stay None until the stream fires it."""
     return {
         "alert_id": row.alert_id,
-        "username": row.username,
+        "email": row.email,
         "symbol": row.symbol,
         "direction": row.direction,
         "threshold": float(row.threshold),

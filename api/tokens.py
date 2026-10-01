@@ -5,10 +5,10 @@ ALGORITHM = "HS256"
 class TokenError(ValueError):
     """Token Error."""
 
-def create_token(secret, username, role, now, expires_in_seconds):
+def create_token(secret, email, role, now, expires_in_seconds):
     iat = int(now.timestamp())
     claims = {
-        "sub": username,
+        "sub": email,
         "role": role,
         "iat": iat,
         "exp": iat + expires_in_seconds,

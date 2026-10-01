@@ -9,8 +9,8 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
 INSERT_USER_SQL = text(
-    "INSERT INTO users (username, password_hash) "
-    "VALUES (:username, :password_hash) "
+    "INSERT INTO users (email, password_hash) "
+    "VALUES (:email, :password_hash) "
     "RETURNING user_id"
 )
 
@@ -29,9 +29,9 @@ PASSWORD_HASH = "$2b$04$synthetic-value-for-tests-only"
 MISSING_USER_ID = 999_999
 
 
-def insert_user(connection, username):
+def insert_user(connection, email):
     return connection.execute(
-        INSERT_USER_SQL, {"username": username, "password_hash": PASSWORD_HASH}
+        INSERT_USER_SQL, {"email": email, "password_hash": PASSWORD_HASH}
     ).scalar_one()
 
 
@@ -57,7 +57,7 @@ def test_an_alert_with_no_user_is_refused(api_tables):
 
 
 def test_an_alert_is_stored_against_the_user_who_created_it(api_tables):
-    user_id = insert_user(api_tables, "ada")
+    user_id = insert_user(api_tables, "ada@example.com")
 
     alert_id = insert_alert(api_tables, user_id)
 

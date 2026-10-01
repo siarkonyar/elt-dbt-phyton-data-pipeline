@@ -49,11 +49,11 @@ API_TIMEOUT_SECONDS = 10
 FAKE_WEBSOCKET_PORT = 8080
 FAKE_TIMEOUT_SECONDS = 10
 
-# Matches API_ADMIN_USERNAME / API_ADMIN_PASSWORD in docker-compose.e2e.yaml.
-ADMIN_USERNAME = "admin"
+# Matches API_ADMIN_EMAIL / API_ADMIN_PASSWORD in docker-compose.e2e.yaml.
+ADMIN_EMAIL = "admin@example.com"
 ADMIN_PASSWORD = "e2e-admin-password"
 
-USER_USERNAME = "plain-user"
+USER_EMAIL = "plain-user@example.com"
 USER_PASSWORD = "a-plain-password"
 
 # The api has to finish its lifespan - create the users table and seed the
@@ -251,10 +251,10 @@ def api_url(compose):
     return url
 
 
-def _login(api_url, username, password):
+def _login(api_url, email, password):
     response = requests.post(
         api_url("/auth/login"),
-        json={"username": username, "password": password},
+        json={"email": email, "password": password},
         timeout=API_TIMEOUT_SECONDS,
     )
     response.raise_for_status()
@@ -274,13 +274,13 @@ def admin_token(api_url):
 
     while time.monotonic() < deadline:
         try:
-            return _login(api_url, ADMIN_USERNAME, ADMIN_PASSWORD)
+            return _login(api_url, ADMIN_EMAIL, ADMIN_PASSWORD)
         except requests.RequestException as error:
             last_problem = f"{type(error).__name__}: {error}"
         time.sleep(POLL_SECONDS)
 
     pytest.fail(
-        f"could not sign in as {ADMIN_USERNAME} within {LOGIN_TIMEOUT_SECONDS}s "
+        f"could not sign in as {ADMIN_EMAIL} within {LOGIN_TIMEOUT_SECONDS}s "
         f"- last problem: {last_problem}"
     )
 
@@ -300,8 +300,8 @@ def user_headers(api_url, admin_token):
     """
     requests.post(
         api_url("/auth/register"),
-        json={"username": USER_USERNAME, "password": USER_PASSWORD},
+        json={"email": USER_EMAIL, "password": USER_PASSWORD},
         timeout=API_TIMEOUT_SECONDS,
     )
 
-    return {"Authorization": f"Bearer {_login(api_url, USER_USERNAME, USER_PASSWORD)}"}
+    return {"Authorization": f"Bearer {_login(api_url, USER_EMAIL, USER_PASSWORD)}"}

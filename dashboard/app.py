@@ -19,10 +19,12 @@ PAGES = [
     st.Page("views/pipeline.py", title="Pipeline", icon="🛠️"),
 ]
 
+INVALID_EMAIL = "Enter a valid email address, like you@example.com."
+
 
 def render_login():
     with st.form("login", border=False):
-        username = st.text_input("Username")
+        email = st.text_input("Email", placeholder="you@example.com")
         password = st.text_input("Password", type="password")
         submitted = st.form_submit_button(
             "Sign in", type="primary", use_container_width=True
@@ -31,11 +33,15 @@ def render_login():
     if not submitted:
         return
 
+    if not auth.is_email(email):
+        st.error(INVALID_EMAIL)
+        return
+
     try:
         credentials = auth.login(
             ui.api_session(),
             ui.API_BASE_URL,
-            username,
+            email,
             password,
             ui.API_TIMEOUT_SECONDS,
         )
@@ -52,7 +58,7 @@ def render_login():
     # the account actually has.
     st.session_state["token"] = credentials.token
     st.session_state["role"] = credentials.role
-    st.session_state["username"] = username.strip().lower()
+    st.session_state["email"] = email.strip().lower()
     st.rerun()
 
 
@@ -62,7 +68,11 @@ def render_register():
     with st.form("register", border=False):
         # max_chars mirrors the api's RegisterRequest, so an over-long entry is
         # refused here rather than coming back as an opaque 422.
-        username = st.text_input("Choose a username", max_chars=64)
+        email = st.text_input(
+            "Email",
+            placeholder="you@example.com",
+            max_chars=auth.MAX_EMAIL_LENGTH,
+        )
         password = st.text_input("Choose a password", type="password", max_chars=72)
         submitted = st.form_submit_button(
             "Create account", type="primary", use_container_width=True
@@ -71,15 +81,19 @@ def render_register():
     if not submitted:
         return
 
-    if not username.strip() or not password:
-        st.error("Enter a username and a password.")
+    if not auth.is_email(email):
+        st.error(INVALID_EMAIL)
+        return
+
+    if not password:
+        st.error("Enter a password.")
         return
 
     try:
         created = auth.register(
             ui.api_session(),
             ui.API_BASE_URL,
-            username,
+            email,
             password,
             ui.API_TIMEOUT_SECONDS,
         )
@@ -91,7 +105,7 @@ def render_register():
         st.success("Account created. Sign in on the other tab.")
     else:
         # Not an error the api treats as a failure of yours - just pick another.
-        st.error("That username is already taken.")
+        st.error("An account with that email already exists. Sign in instead.")
 
 
 def render_sign_in_page():
@@ -119,7 +133,7 @@ def render_sidebar():
     with st.sidebar:
         st.divider()
         st.caption("Signed in as")
-        st.markdown(f"**{st.session_state['username']}** · {st.session_state['role']}")
+        st.markdown(f"**{st.session_state['email']}** · {st.session_state['role']}")
 
         if st.button("Log out", use_container_width=True):
             ui.sign_out()

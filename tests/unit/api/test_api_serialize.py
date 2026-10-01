@@ -55,7 +55,7 @@ def _alert_row(**overrides):
     """A waiting alert, the shape LIST_ALERTS_SQL returns."""
     defaults = {
         "alert_id": 7,
-        "username": "ada",
+        "email": "ada@example.com",
         "symbol": "NVDA",
         "direction": "above",
         "threshold": Decimal("100.00"),
@@ -102,7 +102,7 @@ def test_an_alert_has_exactly_the_expected_keys(api_serialize):
 
     assert set(result.keys()) == {
         "alert_id",
-        "username",
+        "email",
         "symbol",
         "direction",
         "threshold",

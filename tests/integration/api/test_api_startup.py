@@ -13,11 +13,11 @@ COUNT_USERS_SQL = text("SELECT count(*) FROM users")
 TABLES_SQL = text("SELECT tablename FROM pg_tables WHERE schemaname = 'public'")
 
 
-def seeded_config(api_config, username="admin", password=ADMIN_PASSWORD):
+def seeded_config(api_config, email="admin@example.com", password=ADMIN_PASSWORD):
     return api_config.load_config(
         {
             "JWT_SECRET": SECRET,
-            "API_ADMIN_USERNAME": username,
+            "API_ADMIN_EMAIL": email,
             "API_ADMIN_PASSWORD": password,
         }
     )
@@ -45,7 +45,7 @@ def test_the_startup_seeds_the_configured_admin(
 ):
     api_main.prepare_database(connection, seeded_config(api_config))
 
-    assert api_db.read_user(connection, "admin") is not None
+    assert api_db.read_user(connection, "admin@example.com") is not None
 
 
 def test_the_seeded_admin_has_the_admin_role(connection, api_main, api_config, api_db):
@@ -53,7 +53,7 @@ def test_the_seeded_admin_has_the_admin_role(connection, api_main, api_config, a
     user, a fresh install would have no way to reach the admin route at all."""
     api_main.prepare_database(connection, seeded_config(api_config))
 
-    assert api_db.read_user(connection, "admin").role == "admin"
+    assert api_db.read_user(connection, "admin@example.com").role == "admin"
 
 
 def test_the_seeded_admin_password_verifies(
@@ -62,25 +62,27 @@ def test_the_seeded_admin_password_verifies(
     """Hashed on the way in, not stored raw."""
     api_main.prepare_database(connection, seeded_config(api_config))
 
-    stored = api_db.read_user(connection, "admin").password_hash
+    stored = api_db.read_user(connection, "admin@example.com").password_hash
 
     assert stored != ADMIN_PASSWORD
     assert api_passwords.verify_password(ADMIN_PASSWORD, stored)
 
 
-def test_the_seeded_admin_username_is_lower_cased(
+def test_the_seeded_admin_email_is_lower_cased(
     connection, api_main, api_config, api_db
 ):
-    """API_ADMIN_USERNAME=Admin in .env has to become "admin" in the table.
+    """API_ADMIN_EMAIL=Admin in .env has to become "admin" in the table.
 
-    login() lower-cases before it looks up, and Postgres stores usernames
+    login() lower-cases before it looks up, and Postgres stores emails
     case-sensitively. Seed "Admin" without normalising and the account exists
     but nobody can ever log into it - which reads as a wrong password, with
     nothing in any log to say otherwise.
     """
-    api_main.prepare_database(connection, seeded_config(api_config, username="Admin"))
+    api_main.prepare_database(
+        connection, seeded_config(api_config, email="Admin@Example.com")
+    )
 
-    assert api_db.read_user(connection, "admin") is not None
+    assert api_db.read_user(connection, "admin@example.com") is not None
 
 
 def test_running_the_startup_twice_leaves_one_admin(connection, api_main, api_config):
@@ -99,16 +101,16 @@ def test_running_the_startup_twice_does_not_change_the_password_hash(
 ):
     """The test that catches DO UPDATE.
 
-    With DO UPDATE the test above still passes - one row, right username - while
+    With DO UPDATE the test above still passes - one row, right email - while
     every restart silently resets a password the admin had changed.
     """
     config = seeded_config(api_config)
     api_main.prepare_database(connection, config)
-    first = api_db.read_user(connection, "admin").password_hash
+    first = api_db.read_user(connection, "admin@example.com").password_hash
 
     api_main.prepare_database(connection, config)
 
-    assert api_db.read_user(connection, "admin").password_hash == first
+    assert api_db.read_user(connection, "admin@example.com").password_hash == first
 
 
 def test_no_admin_is_seeded_when_none_is_configured(connection, api_main, api_config):

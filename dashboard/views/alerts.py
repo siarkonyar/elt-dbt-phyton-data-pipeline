@@ -19,7 +19,7 @@ ALERT_MIN_THRESHOLD = 0.01
 TABLE_COLUMNS = ["alert_id", "symbol", "condition", "status", "created_at"]
 COLUMN_CONFIG = {
     "alert_id": st.column_config.NumberColumn("#", format="#%d", width="small"),
-    "username": st.column_config.TextColumn("Owner"),
+    "email": st.column_config.TextColumn("Owner"),
     "symbol": st.column_config.TextColumn("Symbol"),
     "condition": st.column_config.TextColumn("Condition"),
     "status": st.column_config.TextColumn("Status"),
@@ -241,7 +241,7 @@ def alert_board():
 
     # An admin sees everyone's alerts, so they need to know whose is whose.
     columns = (
-        ["alert_id", "username", *TABLE_COLUMNS[1:]] if ui.is_admin() else TABLE_COLUMNS
+        ["alert_id", "email", *TABLE_COLUMNS[1:]] if ui.is_admin() else TABLE_COLUMNS
     )
 
     st.dataframe(

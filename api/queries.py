@@ -12,43 +12,43 @@ GET_CANDLES_SQL = text(
 
 GET_USER_SQL = text(
   """
-    SELECT user_id, username, password_hash, role, created_at
+    SELECT user_id, email, password_hash, role, created_at
       FROM users
-    WHERE username = :username
+    WHERE email = :email
   """
 )
 
 INSERT_USER_SQL = text(
   """
-    INSERT INTO users (username, password_hash, role)
-    VALUES (:username, :password_hash, :role)
-    ON CONFLICT (username) DO NOTHING
+    INSERT INTO users (email, password_hash, role)
+    VALUES (:email, :password_hash, :role)
+    ON CONFLICT (email) DO NOTHING
     RETURNING user_id
   """
 )
 
-# The token only carries a username, so the user_id comes from a SELECT
+# The token only carries an email, so the user_id comes from a SELECT
 # instead of VALUES. No such user means no row to insert and nothing RETURNED.
 INSERT_ALERT_SQL = text(
   """
     INSERT INTO price_alerts (user_id, symbol, direction, threshold)
     SELECT user_id, :symbol, :direction, :threshold
       FROM users
-    WHERE username = :username
+    WHERE email = :email
     RETURNING alert_id
   """
 )
 
-# One query for both callers: a username narrows it to that user's alerts,
+# One query for both callers: an email narrows it to that user's alerts,
 # NULL (an admin) leaves every row in. The CAST gives Postgres a type for the
 # parameter even when it is NULL.
 LIST_ALERTS_SQL = text(
   """
-    SELECT a.alert_id, u.username, a.symbol, a.direction, a.threshold,
+    SELECT a.alert_id, u.email, a.symbol, a.direction, a.threshold,
            a.created_at, a.triggered_at, a.triggered_price
       FROM price_alerts AS a
       JOIN users AS u ON u.user_id = a.user_id
-    WHERE CAST(:username AS TEXT) IS NULL OR u.username = :username
+    WHERE CAST(:email AS TEXT) IS NULL OR u.email = :email
     ORDER BY a.alert_id DESC
     LIMIT :limit
   """

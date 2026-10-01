@@ -9,8 +9,8 @@ from sqlalchemy import text
 
 INSERT_USER_SQL = text(
     """
-    INSERT INTO users (username, password_hash)
-    VALUES (:username, :password_hash)
+    INSERT INTO users (email, password_hash)
+    VALUES (:email, :password_hash)
     RETURNING user_id
     """
 )
@@ -40,9 +40,9 @@ PASSWORD_HASH = "$2b$04$synthetic-value-for-tests-only"
 MISSING_ALERT_ID = 9999
 
 
-def make_user(connection, username="ada"):
+def make_user(connection, email="ada@example.com"):
     return connection.execute(
-        INSERT_USER_SQL, {"username": username, "password_hash": PASSWORD_HASH}
+        INSERT_USER_SQL, {"email": email, "password_hash": PASSWORD_HASH}
     ).scalar_one()
 
 

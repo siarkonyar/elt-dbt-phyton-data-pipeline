@@ -17,8 +17,8 @@ TRADE_TIME = datetime(2024, 1, 1, 12, 0, 5, tzinfo=UTC)
 
 INSERT_USER_SQL = text(
     """
-    INSERT INTO users (username, password_hash)
-    VALUES ('ada', '$2b$04$synthetic-value-for-tests-only')
+    INSERT INTO users (email, password_hash)
+    VALUES ('ada@example.com', '$2b$04$synthetic-value-for-tests-only')
     RETURNING user_id
     """
 )

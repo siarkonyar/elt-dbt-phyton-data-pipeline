@@ -45,33 +45,33 @@ def apply_schema(connection):
     """Run the CREATE TABLE IF NOT EXISTS statements in schema.sql."""
     connection.exec_driver_sql(SCHEMA_PATH.read_text(encoding="utf-8"))
 
-def read_user(connection, username):
+def read_user(connection, email):
     return connection.execute(
-        GET_USER_SQL, {"username": username}
+        GET_USER_SQL, {"email": email}
     ).one_or_none()
 
-def create_user(connection, username, password_hash, role):
+def create_user(connection, email, password_hash, role):
     return connection.execute(
         INSERT_USER_SQL,
-        {"username": username, "password_hash": password_hash, "role": role},
+        {"email": email, "password_hash": password_hash, "role": role},
     ).scalar()
 
-def create_alert(connection, username, symbol, direction, threshold):
-    """The new alert_id, or None if that username has no account."""
+def create_alert(connection, email, symbol, direction, threshold):
+    """The new alert_id, or None if that email has no account."""
     return connection.execute(
         INSERT_ALERT_SQL,
         {
-            "username": username,
+            "email": email,
             "symbol": symbol,
             "direction": direction,
             "threshold": threshold,
         },
     ).scalar()
 
-def read_alerts(connection, username):
-    """One user's alerts, or everyone's when username is None."""
+def read_alerts(connection, email):
+    """One user's alerts, or everyone's when email is None."""
     return connection.execute(
-        LIST_ALERTS_SQL, {"username": username, "limit": ALERT_LIST_LIMIT}
+        LIST_ALERTS_SQL, {"email": email, "limit": ALERT_LIST_LIMIT}
     ).all()
 
 def delete_alert(connection, alert_id):

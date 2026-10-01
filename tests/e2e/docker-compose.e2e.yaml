@@ -56,7 +56,7 @@ services:
       # instead of at the config.
       JWT_SECRET: an-e2e-secret-that-is-at-least-thirty-two-characters
       JWT_EXPIRY_SECONDS: 3600
-      API_ADMIN_USERNAME: admin
+      API_ADMIN_EMAIL: admin@example.com
       API_ADMIN_PASSWORD: e2e-admin-password
     ports: !override
       - '8000'

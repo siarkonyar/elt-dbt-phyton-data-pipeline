@@ -256,8 +256,13 @@ def api_db():
     return _load_with_bare_siblings("api", "db", ("queries",))
 
 @pytest.fixture(scope="session")
+def api_emails():
+    return _load_service_module("api", "emails")
+
+@pytest.fixture(scope="session")
 def api_config():
-    return _load_service_module("api", "config")
+    """config.py does `from emails import ...` to check the seeded admin."""
+    return _load_with_bare_siblings("api", "config", ("emails",))
 
 @pytest.fixture(scope="session")
 def api_passwords():
@@ -272,8 +277,9 @@ def api_tokens():
 @pytest.fixture(scope="session")
 def api_auth():
     """auth.py does `from config import ...` and `from tokens import ...`, so
-    both have to be in place under their bare names before it loads."""
-    return _load_with_bare_siblings("api", "auth", ("config", "tokens"))
+    both have to be in place under their bare names before it loads - and
+    config needs emails before it."""
+    return _load_with_bare_siblings("api", "auth", ("emails", "config", "tokens"))
 
 @pytest.fixture
 def api_tables(connection, api_db):
@@ -287,11 +293,12 @@ def api_tables(connection, api_db):
 
 
 # Dependency order, because a sibling cannot be loaded before the module it
-# imports: queries before db, and config plus tokens before auth. main.py
-# imports auth, so auth comes last.
+# imports: queries before db, emails before config, and config plus tokens
+# before auth. main.py imports auth, so auth comes last.
 API_BARE_MODULES = (
     "queries",
     "serialize",
+    "emails",
     "config",
     "passwords",
     "tokens",

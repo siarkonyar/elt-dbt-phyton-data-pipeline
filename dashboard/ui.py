@@ -24,7 +24,7 @@ CANDLE_LAG_GRACE_SECONDS = 300
 # st.error just before it is thrown away. The outcome goes here instead and
 # is drawn on the next run, once.
 FEEDBACK_KEY = "feedback"
-SESSION_KEYS = ("token", "role", "username")
+SESSION_KEYS = ("token", "role", "email")
 
 # Green and red mean up and down, and nothing else on the page.
 UP_COLOR = "#16A34A"

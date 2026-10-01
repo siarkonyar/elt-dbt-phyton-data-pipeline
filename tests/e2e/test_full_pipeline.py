@@ -21,8 +21,8 @@ ROLLUP_OK_SQL = text("SELECT count(*) FROM rollup_runs WHERE status = 'ok'")
 
 API_TIMEOUT_SECONDS = 10
 
-# Matches USER_USERNAME in tests/e2e/conftest.py.
-PLAIN_USERNAME = "plain-user"
+# Matches USER_EMAIL in tests/e2e/conftest.py.
+PLAIN_EMAIL = "plain-user@example.com"
 
 # TSLA because no other test here counts its candles - a pushed NVDA trade
 # would add a second NVDA candle and break the exactly-one checks above.
@@ -135,7 +135,7 @@ READ_ALERT_SQL = text("SELECT alert_id FROM price_alerts WHERE alert_id = :alert
 
 OWNER_SQL = text(
     """
-    SELECT u.username
+    SELECT u.email
       FROM price_alerts AS a
       JOIN users AS u ON u.user_id = a.user_id
      WHERE a.alert_id = :alert_id
@@ -198,7 +198,7 @@ def test_an_alert_created_over_http_belongs_to_its_creator(
     with e2e_engine.connect() as connection:
         owner = connection.execute(OWNER_SQL, {"alert_id": alert_id}).scalar_one()
 
-    assert owner == PLAIN_USERNAME
+    assert owner == PLAIN_EMAIL
 
 
 def test_a_user_lists_only_their_own_alerts(api_url, user_headers, admin_headers):
@@ -215,11 +215,11 @@ def test_an_admin_lists_every_users_alert(api_url, user_headers, admin_headers):
     theirs = make_alert(api_url, user_headers)
 
     owners = {
-        alert["alert_id"]: alert["username"]
+        alert["alert_id"]: alert["email"]
         for alert in list_alerts(api_url, admin_headers)
     }
 
-    assert owners[theirs] == PLAIN_USERNAME
+    assert owners[theirs] == PLAIN_EMAIL
 
 
 def test_the_api_refuses_a_candle_request_with_no_token(api_url):
@@ -243,7 +243,7 @@ def test_the_api_hands_out_a_token_for_the_seeded_admin(admin_token):
 def test_the_api_refuses_the_seeded_admin_with_a_wrong_password(api_url):
     response = requests.post(
         api_url("/auth/login"),
-        json={"username": "admin", "password": "not-the-password"},
+        json={"email": "admin@example.com", "password": "not-the-password"},
         timeout=API_TIMEOUT_SECONDS,
     )
 
