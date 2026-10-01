@@ -21,17 +21,14 @@ ROLLUP_OK_SQL = text("SELECT count(*) FROM rollup_runs WHERE status = 'ok'")
 
 API_TIMEOUT_SECONDS = 10
 
-# Below the price NVDA closes the minute at, so the very next rollup pass
-# has to fire it.
-ALERT_THRESHOLD = 100.0
+# Matches USER_USERNAME in tests/e2e/conftest.py.
+PLAIN_USERNAME = "plain-user"
 
-NEW_ALERT_SQL = text(
-    """
-    INSERT INTO price_alerts (symbol, direction, threshold)
-    VALUES (:symbol, 'above', :threshold)
-    RETURNING alert_id
-    """
-)
+# TSLA because no other test here counts its candles - a pushed NVDA trade
+# would add a second NVDA candle and break the exactly-one checks above.
+LIVE_SYMBOL = "TSLA"
+LIVE_THRESHOLD = 250.0
+LIVE_PRICE = 260.0
 
 #this is written here because we want to call the nvidia candle
 #only once throughout this session.
@@ -132,43 +129,97 @@ def test_api_serves_the_candle_over_http(nvda_candle, api_url, admin_headers):
     assert prices == EXPECTED_OHLC
     assert candle["trade_count"] == NVDA_TRADES
 
-def test_the_rollup_container_fires_a_users_alert(
-    nvda_candle, e2e_engine, wait_for_triggered_alert
-):
-    """The last link in the chain: a row a user would have typed on the
-    dashboard, judged by the real rollup container.
-
-    Depends on nvda_candle so price_alerts exists and the pipeline is known
-    to be alive. The rollup re-runs over an overlapping window, so an alert
-    inserted after that candle landed is still picked up by the next pass.
-
-    The price is checked against the candle the pipeline actually produced,
-    not a constant: firing is only correct if it fired at the real close.
-    """
-    with e2e_engine.begin() as connection:
-        alert_id = connection.execute(
-            NEW_ALERT_SQL, {"symbol": SYMBOL, "threshold": ALERT_THRESHOLD}
-        ).scalar_one()
-
-    alert = wait_for_triggered_alert(alert_id)
-
-    assert float(alert.triggered_price) == float(nvda_candle.close)
-
-
 # ------------------------------------------------------------------ auth, over HTTP
 
 READ_ALERT_SQL = text("SELECT alert_id FROM price_alerts WHERE alert_id = :alert_id")
+
+OWNER_SQL = text(
+    """
+    SELECT u.username
+      FROM price_alerts AS a
+      JOIN users AS u ON u.user_id = a.user_id
+     WHERE a.alert_id = :alert_id
+    """
+)
 
 # High enough that the rollup will never fire it, so deleting it is the only
 # thing that ever happens to this row.
 UNREACHABLE_THRESHOLD = 999999.0
 
 
-def make_alert(engine, symbol=OTHER_SYMBOL, threshold=UNREACHABLE_THRESHOLD):
-    with engine.begin() as connection:
-        return connection.execute(
-            NEW_ALERT_SQL, {"symbol": symbol, "threshold": threshold}
-        ).scalar_one()
+def make_alert(api_url, headers, symbol=OTHER_SYMBOL, threshold=UNREACHABLE_THRESHOLD):
+    """Created the way a user creates one: over HTTP, owned by the token."""
+    response = requests.post(
+        api_url("/alerts"),
+        json={"symbol": symbol, "direction": "above", "threshold": threshold},
+        headers=headers,
+        timeout=API_TIMEOUT_SECONDS,
+    )
+
+    assert response.status_code == 201
+    return response.json()["alert_id"]
+
+
+def list_alerts(api_url, headers):
+    response = requests.get(
+        api_url("/alerts"), headers=headers, timeout=API_TIMEOUT_SECONDS
+    )
+
+    assert response.status_code == 200
+    return response.json()
+
+
+def test_the_stream_fires_a_users_alert_live(
+    nvda_candle, api_url, user_headers, push_trade, wait_for_triggered_alert
+):
+    """The whole feature: a user creates an alert over HTTP, a trade crosses
+    it, and the real stream container stamps it.
+
+    Depends on nvda_candle so the stream is known to be connected. The trade
+    is pushed after the alert exists, because live alerts never look back.
+    """
+    alert_id = make_alert(
+        api_url, user_headers, symbol=LIVE_SYMBOL, threshold=LIVE_THRESHOLD
+    )
+
+    push_trade(LIVE_SYMBOL, LIVE_PRICE)
+
+    alert = wait_for_triggered_alert(alert_id)
+
+    assert float(alert.triggered_price) == LIVE_PRICE
+
+
+def test_an_alert_created_over_http_belongs_to_its_creator(
+    e2e_engine, api_url, user_headers
+):
+    """The reason for the user_id column, checked where it lives."""
+    alert_id = make_alert(api_url, user_headers)
+
+    with e2e_engine.connect() as connection:
+        owner = connection.execute(OWNER_SQL, {"alert_id": alert_id}).scalar_one()
+
+    assert owner == PLAIN_USERNAME
+
+
+def test_a_user_lists_only_their_own_alerts(api_url, user_headers, admin_headers):
+    mine = make_alert(api_url, user_headers)
+    someone_elses = make_alert(api_url, admin_headers)
+
+    listed = {alert["alert_id"] for alert in list_alerts(api_url, user_headers)}
+
+    assert mine in listed
+    assert someone_elses not in listed
+
+
+def test_an_admin_lists_every_users_alert(api_url, user_headers, admin_headers):
+    theirs = make_alert(api_url, user_headers)
+
+    owners = {
+        alert["alert_id"]: alert["username"]
+        for alert in list_alerts(api_url, admin_headers)
+    }
+
+    assert owners[theirs] == PLAIN_USERNAME
 
 
 def test_the_api_refuses_a_candle_request_with_no_token(api_url):
@@ -214,7 +265,7 @@ def test_a_registered_user_may_read_the_candles(nvda_candle, api_url, user_heade
 def test_a_registered_user_may_not_delete_an_alert(e2e_engine, api_url, user_headers):
     """403, and the row is still there afterwards. Checking only the status
     would pass against a route that answered 403 and deleted it anyway."""
-    alert_id = make_alert(e2e_engine)
+    alert_id = make_alert(api_url, user_headers)
 
     response = requests.delete(
         api_url(f"/alerts/{alert_id}"),
@@ -230,10 +281,12 @@ def test_a_registered_user_may_not_delete_an_alert(e2e_engine, api_url, user_hea
     assert survivor.alert_id == alert_id
 
 
-def test_an_admin_deletes_an_alert_over_http(e2e_engine, api_url, admin_headers):
+def test_an_admin_deletes_an_alert_over_http(
+    e2e_engine, api_url, admin_headers, user_headers
+):
     """The payoff. HTTP in, SQL out: the 204 only proves the api said yes, so
     the row being gone from Postgres is what proves it happened."""
-    alert_id = make_alert(e2e_engine)
+    alert_id = make_alert(api_url, user_headers)
 
     response = requests.delete(
         api_url(f"/alerts/{alert_id}"),

@@ -12,6 +12,10 @@ services:
       dockerfile: Dockerfile
     networks:
       - elt_network
+    # Published so the test can POST /trade from the host. No !override: the
+    # base file has no fake_websocket, so there is no list to clash with.
+    ports:
+      - '8080'
 
   destination_postgres:
     environment:
