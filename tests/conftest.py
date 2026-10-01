@@ -192,6 +192,12 @@ def dashboard_auth():
     return _load_service_module("dashboard", "auth")
 
 
+@pytest.fixture(scope="session")
+def dashboard_status():
+    """Pure rules with no Streamlit import, so it loads outside the image."""
+    return _load_service_module("dashboard", "status")
+
+
 # users has no foreign keys pointing at it, so no CASCADE is needed. Note this
 # also wipes any admin the api container seeded at startup, so every test that
 # needs a user has to create its own.

@@ -1,0 +1,23 @@
+# Read by Streamlit at startup, from the directory `streamlit run` is called
+# in - /app inside the image. Every widget picks these up, so the page code
+# never has to colour a button or an input by hand.
+#
+# 1.37 understands only these six theme keys. Anything finer (borders, radii,
+# chart palettes) has to come from the page itself.
+[theme]
+base = "light"
+# One accent for anything clickable or selected. Green and red are kept out
+# of the theme on purpose: on this page they mean "price up" and "price down"
+# and nothing else.
+primaryColor = "#2563EB"
+backgroundColor = "#FFFFFF"
+# The sidebar, inputs and table headers. A shade off white so they read as
+# separate surfaces without needing a border.
+secondaryBackgroundColor = "#F3F5F9"
+textColor = "#0F172A"
+font = "sans serif"
+
+[client]
+# Hides the developer menu (rerun, clear cache, settings). A visitor has no use
+# for it, and it is the first thing that makes a page look like a prototype.
+toolbarMode = "minimal"
