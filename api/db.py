@@ -3,9 +3,19 @@ from pathlib import Path
 
 from sqlalchemy import create_engine
 
-from queries import DELETE_ALERT_SQL, GET_CANDLES_SQL, GET_USER_SQL, INSERT_USER_SQL
+from queries import (
+    DELETE_ALERT_SQL,
+    GET_CANDLES_SQL,
+    GET_USER_SQL,
+    INSERT_ALERT_SQL,
+    INSERT_USER_SQL,
+    LIST_ALERTS_SQL,
+)
 
 SCHEMA_PATH = Path(__file__).with_name("schema.sql")
+
+# The dashboard has always shown the newest 20.
+ALERT_LIST_LIMIT = 20
 
 def get_engine(env=None):
     env = os.environ if env is None else env
@@ -45,6 +55,24 @@ def create_user(connection, username, password_hash, role):
         INSERT_USER_SQL,
         {"username": username, "password_hash": password_hash, "role": role},
     ).scalar()
+
+def create_alert(connection, username, symbol, direction, threshold):
+    """The new alert_id, or None if that username has no account."""
+    return connection.execute(
+        INSERT_ALERT_SQL,
+        {
+            "username": username,
+            "symbol": symbol,
+            "direction": direction,
+            "threshold": threshold,
+        },
+    ).scalar()
+
+def read_alerts(connection, username):
+    """One user's alerts, or everyone's when username is None."""
+    return connection.execute(
+        LIST_ALERTS_SQL, {"username": username, "limit": ALERT_LIST_LIMIT}
+    ).all()
 
 def delete_alert(connection, alert_id):
     return connection.execute(

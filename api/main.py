@@ -2,9 +2,10 @@ import sys
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from functools import lru_cache
+from typing import Annotated, Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Query, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 from sqlalchemy.exc import SQLAlchemyError
 
 import db
@@ -17,7 +18,7 @@ from auth import (
 )
 from config import ConfigError
 from passwords import hash_password, verify_password
-from serialize import candle_to_dict
+from serialize import alert_to_dict, candle_to_dict
 from tokens import create_token
 
 NEW_USER_ROLE = "user"
@@ -163,6 +164,72 @@ def register(
         )
 
     return {"username": username, "role": NEW_USER_ROLE}
+
+
+AlertSymbol = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True, to_upper=True, min_length=1, max_length=10
+    ),
+]
+
+class AlertRequest(BaseModel):
+    symbol: AlertSymbol
+    direction: Literal["above", "below"]
+    threshold: float = Field(gt=0)
+
+def create_alert(username, symbol, direction, threshold):
+    with _engine().begin() as connection:
+        return db.create_alert(
+            connection,
+            username=username,
+            symbol=symbol,
+            direction=direction,
+            threshold=threshold,
+        )
+
+def get_alert_creator():
+    return create_alert
+
+@app.post("/alerts", status_code=status.HTTP_201_CREATED)
+def add_alert(
+    alert: AlertRequest,
+    creator=Depends(get_alert_creator),
+    user: AuthenticatedUser = Depends(get_current_user),
+):
+    alert_id = creator(user.username, alert.symbol, alert.direction, alert.threshold)
+
+    # The token is valid but its account is gone - deleted after it was issued.
+    if alert_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="this account no longer exists",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    return {
+        "alert_id": alert_id,
+        "symbol": alert.symbol,
+        "direction": alert.direction,
+        "threshold": alert.threshold,
+    }
+
+def read_alerts(username):
+    with _engine().connect() as connection:
+        return db.read_alerts(connection, username)
+
+def get_alert_reader():
+    return read_alerts
+
+@app.get("/alerts")
+def list_alerts(
+    reader=Depends(get_alert_reader),
+    user: AuthenticatedUser = Depends(get_current_user),
+):
+    # None tells read_alerts not to filter by owner.
+    username = None if user.role == ADMIN_ROLE else user.username
+    return [alert_to_dict(row) for row in reader(username)]
+    #REVIEW: ask if this is safe or not
 
 
 def delete_alert(alert_id):

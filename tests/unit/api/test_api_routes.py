@@ -644,3 +644,182 @@ def test_an_alert_id_that_is_not_a_number_is_rejected(api_main, api_config, api_
     response = client.delete("/alerts/abc", headers=bearer(token))
 
     assert response.status_code == 422
+
+
+# ------------------------------------------------------------------ POST /alerts
+
+ALERTS_PATH = "/alerts"
+NEW_ALERT_ID = 11
+NEW_ALERT = {"symbol": "NVDA", "direction": "above", "threshold": 100.0}
+
+
+def make_create_client(api_main, api_config, created_id=NEW_ALERT_ID):
+    """created_id=None is how "that username has no account" is expressed,
+    which is what db.create_alert returns when INSERT ... SELECT finds nobody."""
+    calls = []
+
+    def record_create(username, symbol, direction, threshold):
+        calls.append({"username": username, "symbol": symbol,
+                      "direction": direction, "threshold": threshold})
+        return created_id
+
+    api_main.app.dependency_overrides[api_main.get_alert_creator] = (
+        lambda: record_create
+    )
+    use_test_secret(api_main, api_config)
+
+    return TestClient(api_main.app), calls
+
+
+def test_a_new_alert_belongs_to_the_user_in_the_token(api_main, api_config, api_tokens):
+    client, calls = make_create_client(api_main, api_config)
+    token = issue_token(api_tokens, username="ada")
+
+    response = client.post(ALERTS_PATH, json=NEW_ALERT, headers=bearer(token))
+
+    assert response.status_code == 201
+    assert response.json()["alert_id"] == NEW_ALERT_ID
+    assert calls[0]["username"] == "ada"
+
+
+def test_the_request_body_cannot_choose_the_owner(api_main, api_config, api_tokens):
+    """The owner comes from the signed token and nowhere else. Otherwise anyone
+    could create alerts in someone else's name."""
+    client, calls = make_create_client(api_main, api_config)
+    token = issue_token(api_tokens, username="ada")
+
+    client.post(
+        ALERTS_PATH, json={**NEW_ALERT, "username": "grace"}, headers=bearer(token)
+    )
+
+    assert calls[0]["username"] == "ada"
+
+
+def test_a_new_alert_symbol_is_trimmed_and_upper_cased(
+    api_main, api_config, api_tokens
+):
+    """Stored the way the feed sends symbols, or it waits for a price that
+    never arrives."""
+    client, calls = make_create_client(api_main, api_config)
+    token = issue_token(api_tokens)
+
+    client.post(
+        ALERTS_PATH, json={**NEW_ALERT, "symbol": "  nvda "}, headers=bearer(token)
+    )
+
+    assert calls[0]["symbol"] == "NVDA"
+
+
+def test_creating_an_alert_needs_a_token(api_main, api_config):
+    client, calls = make_create_client(api_main, api_config)
+
+    response = client.post(ALERTS_PATH, json=NEW_ALERT)
+
+    assert response.status_code == 401
+    assert calls == []
+
+
+def test_an_alert_for_an_account_that_is_gone_is_unauthorised(
+    api_main, api_config, api_tokens
+):
+    """A valid token whose user was deleted after it was issued."""
+    client, _ = make_create_client(api_main, api_config, created_id=None)
+    token = issue_token(api_tokens)
+
+    response = client.post(ALERTS_PATH, json=NEW_ALERT, headers=bearer(token))
+
+    assert response.status_code == 401
+
+
+@pytest.mark.parametrize(
+    "bad_field",
+    [
+        {"direction": "sideways"},
+        {"threshold": 0},
+        {"threshold": -5},
+        {"symbol": ""},
+        {"symbol": "   "},
+        {"symbol": "X" * 11},
+    ],
+)
+def test_an_invalid_alert_is_rejected(api_main, api_config, api_tokens, bad_field):
+    client, calls = make_create_client(api_main, api_config)
+    token = issue_token(api_tokens)
+
+    response = client.post(
+        ALERTS_PATH, json={**NEW_ALERT, **bad_field}, headers=bearer(token)
+    )
+
+    assert response.status_code == 422
+    assert calls == []
+
+
+# ------------------------------------------------------------------- GET /alerts
+
+
+def _listed_alert(username="ada"):
+    return SimpleNamespace(
+        alert_id=5,
+        username=username,
+        symbol="NVDA",
+        direction="above",
+        threshold=100,
+        created_at=datetime(2024, 1, 1, 12, 0, tzinfo=UTC),
+        triggered_at=None,
+        triggered_price=None,
+    )
+
+
+def make_list_client(api_main, api_config, rows=()):
+    calls = []
+
+    def record_read(username):
+        calls.append(username)
+        return list(rows)
+
+    api_main.app.dependency_overrides[api_main.get_alert_reader] = lambda: record_read
+    use_test_secret(api_main, api_config)
+
+    return TestClient(api_main.app), calls
+
+
+def test_a_plain_user_lists_only_their_own_alerts(api_main, api_config, api_tokens):
+    client, calls = make_list_client(api_main, api_config)
+    token = issue_token(api_tokens, username="ada", role="user")
+
+    client.get(ALERTS_PATH, headers=bearer(token))
+
+    assert calls == ["ada"]
+
+
+def test_an_admin_lists_everyones_alerts(api_main, api_config, api_tokens):
+    """None is what tells read_alerts not to filter."""
+    client, calls = make_list_client(api_main, api_config)
+    token = issue_token(api_tokens, username="root", role="admin")
+
+    client.get(ALERTS_PATH, headers=bearer(token))
+
+    assert calls == [None]
+
+
+def test_listed_alerts_come_back_serialised(api_main, api_config, api_tokens):
+    client, _ = make_list_client(api_main, api_config, rows=[_listed_alert()])
+    token = issue_token(api_tokens)
+
+    response = client.get(ALERTS_PATH, headers=bearer(token))
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body[0]["alert_id"] == 5
+    assert body[0]["username"] == "ada"
+    assert body[0]["threshold"] == 100.0
+    assert body[0]["triggered_at"] is None
+
+
+def test_listing_alerts_needs_a_token(api_main, api_config):
+    client, calls = make_list_client(api_main, api_config)
+
+    response = client.get(ALERTS_PATH)
+
+    assert response.status_code == 401
+    assert calls == []
