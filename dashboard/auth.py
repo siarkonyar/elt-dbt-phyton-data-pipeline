@@ -98,7 +98,15 @@ def register(session, base_url, username, password, timeout_seconds):
     return True
 
 
-def create_alert(session, base_url, token, symbol, direction, threshold, timeout_seconds):
+def create_alert(
+    session,
+    base_url,
+    token,
+    symbol,
+    direction,
+    threshold,
+    timeout_seconds,
+):
     response = session.post(
         _url(base_url, ALERTS_PATH),
         json={"symbol": symbol, "direction": direction, "threshold": threshold},
