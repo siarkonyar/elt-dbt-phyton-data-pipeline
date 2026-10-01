@@ -98,6 +98,36 @@ def register(session, base_url, username, password, timeout_seconds):
     return True
 
 
+def create_alert(session, base_url, token, symbol, direction, threshold, timeout_seconds):
+    response = session.post(
+        _url(base_url, ALERTS_PATH),
+        json={"symbol": symbol, "direction": direction, "threshold": threshold},
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=timeout_seconds,
+    )
+
+    # Also what the api answers if the account was deleted after sign-in.
+    if response.status_code == UNAUTHORIZED:
+        raise AuthError("Your session has expired.")
+
+    response.raise_for_status()
+    return response.json()["alert_id"]
+
+
+def list_alerts(session, base_url, token, timeout_seconds):
+    response = session.get(
+        _url(base_url, ALERTS_PATH),
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=timeout_seconds,
+    )
+
+    if response.status_code == UNAUTHORIZED:
+        raise AuthError("Your session has expired.")
+
+    response.raise_for_status()
+    return response.json()
+
+
 def delete_alert(session, base_url, token, alert_id, timeout_seconds):
     response = session.delete(
         _url(base_url, f"{ALERTS_PATH}/{alert_id}"),

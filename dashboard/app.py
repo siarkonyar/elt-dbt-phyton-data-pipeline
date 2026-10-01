@@ -7,10 +7,8 @@ import streamlit as st
 import auth
 from db import get_destination_engine, table_exists
 from queries import (
-    ALERTS_SQL,
     CANDLE_STATUS_SQL,
     CANDLES_SQL,
-    INSERT_ALERT_SQL,
     LATEST_SQL,
     ROLLUP_RUNS_SQL,
     SESSIONS_SQL,
@@ -65,19 +63,6 @@ def load_rollup_runs(engine):
 
 def load_candle_status(engine):
     return pd.read_sql(CANDLE_STATUS_SQL, engine)
-
-
-def load_alerts(engine):
-    return pd.read_sql(ALERTS_SQL, engine)
-
-
-def create_alert(engine, symbol, direction, threshold):
-    """The only row this page writes. Everything else here is read-only."""
-    with engine.begin() as connection:
-        connection.execute(
-            INSERT_ALERT_SQL,
-            {"symbol": symbol, "direction": direction, "threshold": threshold},
-        )
 
 
 # The only query on the page that reads more than a handful of rows, and the
@@ -316,7 +301,37 @@ def alert_status(row):
     return f"fired at ${row['triggered_price']:,.2f}"
 
 
-def render_alert_form(engine):
+def end_dead_session(error):
+    """401 from the api: the session is gone, so there is nothing to stay on."""
+    remember_feedback("error", f"{error} You have been signed out.")
+    sign_out()
+    st.rerun()
+
+
+def fetch_alerts():
+    """The api's list as a DataFrame, or None once the problem is on screen.
+
+    The api decides whose alerts come back. Reading price_alerts straight from
+    Postgres here would show a plain user everyone's.
+    """
+    try:
+        rows = auth.list_alerts(
+            api_session(),
+            API_BASE_URL,
+            st.session_state["token"],
+            API_TIMEOUT_SECONDS,
+        )
+    except auth.AuthError as error:
+        end_dead_session(error)
+    except Exception as error:
+        # Shown in place, so the tiles and charts keep working without the api.
+        st.error(f"Cannot load alerts - {error}")
+        return None
+
+    return pd.DataFrame(rows)
+
+
+def render_alert_form():
     """Deliberately outside every fragment.
 
     A form inside a fragment on a timer is redrawn every few seconds, which
@@ -324,14 +339,10 @@ def render_alert_form(engine):
     """
     st.subheader("Price alerts")
 
-    if not table_exists(engine, "price_alerts"):
-        st.info("`price_alerts` does not exist yet - start the `rollup` service.")
-        return
-
     st.caption(
-        "The `rollup` service checks these once a minute against the newest "
-        "candle close. An alert fires once, records the price that set it off, "
-        "and then stays put."
+        "The `stream` service checks every trade against these as it arrives. "
+        "An alert fires once, records the trade that set it off, and then "
+        "stays put."
     )
 
     with st.form("new-alert", clear_on_submit=True):
@@ -358,25 +369,47 @@ def render_alert_form(engine):
         st.error("Enter a price to watch for.")
         return
 
-    create_alert(engine, wanted, direction, float(threshold))
+    try:
+        auth.create_alert(
+            api_session(),
+            API_BASE_URL,
+            st.session_state["token"],
+            wanted,
+            direction,
+            float(threshold),
+            API_TIMEOUT_SECONDS,
+        )
+    except auth.AuthError as error:
+        end_dead_session(error)
+    except Exception as error:
+        st.error(f"Could not add the alert - {error}")
+        return
+
     st.success(f"Watching {wanted} for {direction} ${threshold:,.2f}.")
 
 
-def render_alert_list(engine):
-    alerts = load_alerts(engine)
+def render_alert_list():
+    alerts = fetch_alerts()
+
+    if alerts is None:
+        return
 
     if alerts.empty:
         st.caption("No alerts yet.")
         return
 
-    shown = to_float(alerts, ["threshold", "triggered_price"])
+    shown = alerts.copy()
     shown["status"] = shown.apply(alert_status, axis=1)
+    # JSON carries times as ISO strings; a real datetime displays properly.
+    shown["created_at"] = pd.to_datetime(shown["created_at"])
 
-    st.dataframe(
-        shown[["symbol", "direction", "threshold", "status", "created_at"]],
-        use_container_width=True,
-        hide_index=True,
-    )
+    columns = ["symbol", "direction", "threshold", "status", "created_at"]
+
+    # An admin sees everyone's alerts, so they need to know whose is whose.
+    if st.session_state["role"] == "admin":
+        columns = ["username", *columns]
+
+    st.dataframe(shown[columns], use_container_width=True, hide_index=True)
 
 
 @st.cache_resource
@@ -493,10 +526,10 @@ def render_sidebar():
             st.rerun()
 
 
-def render_delete_alert(engine):
-    alerts = load_alerts(engine)
+def render_delete_alert():
+    alerts = fetch_alerts()
 
-    if alerts.empty:
+    if alerts is None or alerts.empty:
         return
 
     # Shown to everyone on purpose. Hiding the control from a plain user would
@@ -643,14 +676,11 @@ def history():
 # fragment - see render_alert_form.
 @st.fragment(run_every=CANDLE_REFRESH)
 def alerts():
-    if not table_exists(engine, "price_alerts"):
-        return
-
-    render_alert_list(engine)
+    render_alert_list()
 
 
 live()
 history()
-render_alert_form(engine)
-render_delete_alert(engine)
+render_alert_form()
+render_delete_alert()
 alerts()

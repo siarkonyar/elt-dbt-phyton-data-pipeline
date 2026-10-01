@@ -38,9 +38,21 @@ class FakeSession:
         self.response = response
         self.requests = []
 
-    def post(self, url, json=None, timeout=None):
+    def post(self, url, json=None, headers=None, timeout=None):
         self.requests.append(
-            {"method": "POST", "url": url, "json": json, "timeout": timeout}
+            {
+                "method": "POST",
+                "url": url,
+                "json": json,
+                "headers": headers,
+                "timeout": timeout,
+            }
+        )
+        return self.response
+
+    def get(self, url, headers=None, timeout=None):
+        self.requests.append(
+            {"method": "GET", "url": url, "headers": headers, "timeout": timeout}
         )
         return self.response
 
@@ -268,3 +280,88 @@ def test_an_expired_token_is_not_reported_as_a_permission_problem(dashboard_auth
         do_delete(dashboard_auth, session)
 
     assert not isinstance(caught.value, dashboard_auth.NotAllowedError)
+
+
+# ------------------------------------------------------------ create and list
+
+NEW_ALERT_ID = 11
+
+
+def do_create(dashboard_auth, session):
+    return dashboard_auth.create_alert(
+        session, BASE_URL, TOKEN, "NVDA", "above", 100.0, TIMEOUT
+    )
+
+
+def do_list(dashboard_auth, session):
+    return dashboard_auth.list_alerts(session, BASE_URL, TOKEN, TIMEOUT)
+
+
+def test_creating_an_alert_posts_the_three_fields_with_the_token(dashboard_auth):
+    """No username in the body: the api takes the owner from the token."""
+    session = FakeSession(
+        FakeResponse(status_code=201, payload={"alert_id": NEW_ALERT_ID})
+    )
+
+    do_create(dashboard_auth, session)
+
+    sent = session.requests[0]
+    assert sent["url"] == f"{BASE_URL}{dashboard_auth.ALERTS_PATH}"
+    assert sent["json"] == {"symbol": "NVDA", "direction": "above", "threshold": 100.0}
+    assert sent["headers"]["Authorization"] == f"Bearer {TOKEN}"
+    assert sent["timeout"] == TIMEOUT
+
+
+def test_a_created_alert_hands_back_its_id(dashboard_auth):
+    session = FakeSession(
+        FakeResponse(status_code=201, payload={"alert_id": NEW_ALERT_ID})
+    )
+
+    assert do_create(dashboard_auth, session) == NEW_ALERT_ID
+
+
+def test_an_expired_token_on_create_raises_an_auth_error(dashboard_auth):
+    """Same handling as delete: the page signs the person out."""
+    session = FakeSession(
+        FakeResponse(status_code=401, error=requests.HTTPError("401 Unauthorized"))
+    )
+
+    with pytest.raises(dashboard_auth.AuthError):
+        do_create(dashboard_auth, session)
+
+
+def test_a_server_failure_during_create_reaches_the_caller(dashboard_auth):
+    session = FakeSession(
+        FakeResponse(status_code=500, error=requests.HTTPError("500 Server Error"))
+    )
+
+    with pytest.raises(requests.HTTPError):
+        do_create(dashboard_auth, session)
+
+
+def test_listing_alerts_gets_the_alert_path_with_the_token(dashboard_auth):
+    session = FakeSession(FakeResponse(status_code=200, payload=[]))
+
+    do_list(dashboard_auth, session)
+
+    sent = session.requests[0]
+    assert sent["method"] == "GET"
+    assert sent["url"] == f"{BASE_URL}{dashboard_auth.ALERTS_PATH}"
+    assert sent["headers"]["Authorization"] == f"Bearer {TOKEN}"
+    assert sent["timeout"] == TIMEOUT
+
+
+def test_listed_alerts_come_back_as_the_api_sent_them(dashboard_auth):
+    alerts = [{"alert_id": 5, "username": "ada", "symbol": "NVDA"}]
+    session = FakeSession(FakeResponse(status_code=200, payload=alerts))
+
+    assert do_list(dashboard_auth, session) == alerts
+
+
+def test_an_expired_token_on_list_raises_an_auth_error(dashboard_auth):
+    session = FakeSession(
+        FakeResponse(status_code=401, error=requests.HTTPError("401 Unauthorized"))
+    )
+
+    with pytest.raises(dashboard_auth.AuthError):
+        do_list(dashboard_auth, session)
