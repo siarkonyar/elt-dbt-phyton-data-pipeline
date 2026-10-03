@@ -12,6 +12,11 @@ MINUTES_BACK = 2
 # typed key: the name plus what type is stored under it.
 BURST_SENT = web.AppKey("burst_sent", bool)
 
+# Every socket that is currently open, so POST /trade knows where to send.
+SOCKETS = web.AppKey("sockets", set)
+
+PUSHED_TRADE_VOLUME = 1.0
+
 # (symbol, seconds past the minute, price, volume)
 BURST = (
     ("NVDA", 10, 100.0, 1.0),
@@ -45,6 +50,40 @@ def burst_payload(now=None):
         ],
     }
 
+def trade_payload(symbol, price, now=None):
+    """One trade, stamped now, in the same Finnhub shape as the burst."""
+    now = now or datetime.now(UTC)
+
+    return {
+        "type": "trade",
+        "data": [
+            {
+                "s": symbol,
+                "t": int(now.timestamp() * 1000),
+                "p": price,
+                "v": PUSHED_TRADE_VOLUME,
+                "c": [],
+            }
+        ],
+    }
+
+async def push_trade(request):
+    """POST /trade {"symbol": ..., "price": ...} - send one trade right now.
+
+    The burst only happens once, at subscribe. A live alert only judges trades
+    that arrive after it exists, so the test has to be able to send one on
+    demand. Answers how many sockets got it: 0 means the stream is not
+    connected, which is a clearer failure than a timeout.
+    """
+    body = await request.json()
+    payload = trade_payload(body["symbol"], body["price"])
+    sockets = tuple(request.app[SOCKETS])
+
+    for socket in sockets:
+        await socket.send_json(payload)
+
+    return web.json_response({"sent": len(sockets)})
+
 async def market_status(request):
     """GET /stock/market-status?exchange=US — always open, always regular."""
     return web.json_response({"isOpen": True, "session": "regular"})
@@ -54,16 +93,20 @@ async def websocket(request):
     """The stream subscribes once per symbol. The first one triggers the burst."""
     socket = web.WebSocketResponse()
     await socket.prepare(request)
+    request.app[SOCKETS].add(socket)
 
-    async for message in socket:
-        if message.type is not WSMsgType.TEXT:
-            continue
+    try:
+        async for message in socket:
+            if message.type is not WSMsgType.TEXT:
+                continue
 
-        if not request.app[BURST_SENT]:
-            # Set the flag BEFORE sending, so the four subscribes that
-            # arrive right behind this one cannot each fire a burst.
-            request.app[BURST_SENT] = True
-            await socket.send_json(burst_payload())
+            if not request.app[BURST_SENT]:
+                # Set the flag BEFORE sending, so the four subscribes that
+                # arrive right behind this one cannot each fire a burst.
+                request.app[BURST_SENT] = True
+                await socket.send_json(burst_payload())
+    finally:
+        request.app[SOCKETS].discard(socket)
 
     # Reached only when the client hangs up. Until then the loop above
     # holds the connection open, which is what stops stream reconnecting.
@@ -72,11 +115,13 @@ async def websocket(request):
 def make_app():
     app = web.Application()
     app[BURST_SENT] = False
+    app[SOCKETS] = set()
     app.add_routes(
         [
             # No path in the socket URL, so the upgrade lands on "/".
             web.get("/", websocket),
             web.get("/stock/market-status", market_status),
+            web.post("/trade", push_trade),
         ]
     )
     return app

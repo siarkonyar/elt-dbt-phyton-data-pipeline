@@ -3,9 +3,19 @@ from pathlib import Path
 
 from sqlalchemy import create_engine
 
-from queries import DELETE_ALERT_SQL, GET_CANDLES_SQL, GET_USER_SQL, INSERT_USER_SQL
+from queries import (
+    DELETE_ALERT_SQL,
+    GET_CANDLES_SQL,
+    GET_USER_SQL,
+    INSERT_ALERT_SQL,
+    INSERT_USER_SQL,
+    LIST_ALERTS_SQL,
+)
 
 SCHEMA_PATH = Path(__file__).with_name("schema.sql")
+
+# The dashboard has always shown the newest 20.
+ALERT_LIST_LIMIT = 20
 
 def get_engine(env=None):
     env = os.environ if env is None else env
@@ -35,16 +45,34 @@ def apply_schema(connection):
     """Run the CREATE TABLE IF NOT EXISTS statements in schema.sql."""
     connection.exec_driver_sql(SCHEMA_PATH.read_text(encoding="utf-8"))
 
-def read_user(connection, username):
+def read_user(connection, email):
     return connection.execute(
-        GET_USER_SQL, {"username": username}
+        GET_USER_SQL, {"email": email}
     ).one_or_none()
 
-def create_user(connection, username, password_hash, role):
+def create_user(connection, email, password_hash, role):
     return connection.execute(
         INSERT_USER_SQL,
-        {"username": username, "password_hash": password_hash, "role": role},
+        {"email": email, "password_hash": password_hash, "role": role},
     ).scalar()
+
+def create_alert(connection, email, symbol, direction, threshold):
+    """The new alert_id, or None if that email has no account."""
+    return connection.execute(
+        INSERT_ALERT_SQL,
+        {
+            "email": email,
+            "symbol": symbol,
+            "direction": direction,
+            "threshold": threshold,
+        },
+    ).scalar()
+
+def read_alerts(connection, email):
+    """One user's alerts, or everyone's when email is None."""
+    return connection.execute(
+        LIST_ALERTS_SQL, {"email": email, "limit": ALERT_LIST_LIMIT}
+    ).all()
 
 def delete_alert(connection, alert_id):
     return connection.execute(

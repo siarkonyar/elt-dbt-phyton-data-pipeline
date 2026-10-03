@@ -12,6 +12,9 @@ source = ["rollup", "stream", "api", "dashboard"]
 omit = [
     "stream/main.py",   # an infinite loop; covering it proves little
     "dashboard/app.py", # a Streamlit script; importing it renders a page
+    "dashboard/views/*",
+    "dashboard/ui.py",
+    "dashboard/data.py",
 ]
 
 [tool.coverage.report]

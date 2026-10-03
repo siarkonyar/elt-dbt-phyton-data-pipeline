@@ -12,7 +12,7 @@ ADMIN_ROLE = "admin"
 
 @dataclass(frozen=True)
 class AuthenticatedUser: # could have been dict
-    username: str
+    email: str
     role: str
 
 
@@ -63,7 +63,7 @@ def get_current_user(
         raise _unauthenticated() from error
 
     # decode_token requires sub and role, so neither lookup can KeyError here.
-    return AuthenticatedUser(username=claims["sub"], role=claims["role"])
+    return AuthenticatedUser(email=claims["sub"], role=claims["role"])
 
 
 def require_admin(user=Depends(get_current_user)):

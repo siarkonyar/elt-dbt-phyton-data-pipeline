@@ -4,13 +4,20 @@ import threading
 import time
 from datetime import UTC, datetime
 
+from alerts import find_triggered
 from backoff import ExponentialBackoff
 from buffer import drain
 from config import ConfigError, load_config
-from db import apply_schema, get_engine
+from db import apply_schema, get_engine, read_pending_alerts
 from market_status import build_session, fetch_market_status
 from socket_client import TRADE, FinnhubSocket
-from writer import finish_session, heartbeat, insert_trades, start_session
+from writer import (
+    finish_session,
+    heartbeat,
+    insert_trades,
+    mark_triggered,
+    start_session,
+)
 
 LOG_INTERVAL_SECONDS = 30
 
@@ -48,6 +55,19 @@ def safe_market_status(config, http):
         return None
 
 
+def check_alerts(engine, trades):
+    if not trades:
+        return 0
+
+    try:
+        with engine.begin() as connection:
+            fired = find_triggered(read_pending_alerts(connection), trades)
+            return mark_triggered(connection, fired)
+    except Exception as error:
+        print(f"alert check failed: {type(error).__name__}: {error}", file=sys.stderr)
+        return 0
+
+
 def flush_loop(config, engine, http, events, session_id, trades_queue):
     """Writes once a second until the socket closes. Runs on the main thread."""
     reported = 0
@@ -82,6 +102,11 @@ def flush_loop(config, engine, http, events, session_id, trades_queue):
             reported = seen
         except Exception as error:
             print(f"write failed: {type(error).__name__}: {error}", file=sys.stderr)
+
+        fired = check_alerts(engine, trades)
+
+        if fired:
+            print(f"{fired} alerts triggered")
 
         if time.monotonic() >= next_log_at:
             print(

@@ -12,7 +12,7 @@ def clear_overrides(api_main):
     yield
     api_main.app.dependency_overrides.clear()
 
-def stub_current_user(api_main, username="tester", role="user"):
+def stub_current_user(api_main, email="tester@example.com", role="user"):
     """Skip the whole auth layer for tests that are about something else.
 
     FastAPI resolves dependencies BEFORE it validates the endpoint's own query
@@ -23,7 +23,7 @@ def stub_current_user(api_main, username="tester", role="user"):
     down, and those use the real dependency.
     """
     api_main.app.dependency_overrides[api_main.get_current_user] = lambda: (
-        api_main.AuthenticatedUser(username=username, role=role)
+        api_main.AuthenticatedUser(email=email, role=role)
     )
 
 def make_client(api_main, rows=()):
@@ -119,14 +119,14 @@ PASSWORD = "correct-horse-battery-staple"
 TEST_ROUNDS = 4  # bcrypt is slow on purpose; see tests/unit/test_api_passwords.py
 
 
-def make_user(api_passwords, username="ada", role="user", password=PASSWORD):
+def make_user(api_passwords, email="ada@example.com", role="user", password=PASSWORD):
     """A stand-in for the row read_user hands back.
 
     SimpleNamespace rather than a dict, so the route has to reach for
     .password_hash exactly as it will against a real SQLAlchemy Row.
     """
     return SimpleNamespace(
-        username=username,
+        email=email,
         password_hash=api_passwords.hash_password(password, rounds=TEST_ROUNDS),
         role=role,
     )
@@ -146,7 +146,7 @@ def make_login_client(api_main, api_config, user=None):
     user=None is how "no such account" is expressed.
     """
     api_main.app.dependency_overrides[api_main.get_user_reader] = lambda: (
-        lambda username: user
+        lambda email: user
     )
     use_test_secret(api_main, api_config)
 
@@ -156,8 +156,8 @@ def make_login_client(api_main, api_config, user=None):
 def make_recording_login_client(api_main, api_config, user=None):
     calls = []
 
-    def record_lookup(username):
-        calls.append(username)
+    def record_lookup(email):
+        calls.append(email)
         return user
 
     api_main.app.dependency_overrides[api_main.get_user_reader] = lambda: record_lookup
@@ -166,8 +166,8 @@ def make_recording_login_client(api_main, api_config, user=None):
     return TestClient(api_main.app), calls
 
 
-def login(client, username="ada", password=PASSWORD):
-    return client.post(LOGIN_PATH, json={"username": username, "password": password})
+def login(client, email="ada@example.com", password=PASSWORD):
+    return client.post(LOGIN_PATH, json={"email": email, "password": password})
 
 
 def test_a_correct_password_returns_a_token(api_main, api_config, api_passwords):
@@ -201,18 +201,18 @@ def test_the_response_reports_the_users_role(api_main, api_config, api_passwords
     assert response.json()["role"] == "admin"
 
 
-def test_the_token_decodes_to_the_username_and_role(
+def test_the_token_decodes_to_the_email_and_role(
     api_main, api_config, api_passwords, api_tokens
 ):
     """Not just that a token came back - that it says what it should. A route
     that signed the wrong claims would pass every test above this one."""
-    admin = make_user(api_passwords, username="ada", role="admin")
+    admin = make_user(api_passwords, email="ada@example.com", role="admin")
     client = make_login_client(api_main, api_config, admin)
 
     token = login(client).json()["access_token"]
 
     claims = api_tokens.decode_token(SECRET, token)
-    assert claims["sub"] == "ada"
+    assert claims["sub"] == "ada@example.com"
     assert claims["role"] == "admin"
 
 
@@ -224,25 +224,25 @@ def test_a_wrong_password_is_rejected(api_main, api_config, api_passwords):
     assert response.status_code == 401
 
 
-def test_an_unknown_username_is_rejected(api_main, api_config):
+def test_an_unknown_email_is_rejected(api_main, api_config):
     client = make_login_client(api_main, api_config, user=None)
 
-    response = login(client, username="nobody")
+    response = login(client, email="nobody@example.com")
 
     assert response.status_code == 401
 
 
-def test_an_unknown_username_and_a_wrong_password_are_answered_identically(
+def test_an_unknown_email_and_a_wrong_password_are_answered_identically(
     api_main, api_config, api_passwords
 ):
     """No user enumeration.
 
     If the two failures differ in status or body by even a word, an attacker
     can discover which accounts exist by reading the difference - and knowing
-    a username is real is most of the work of attacking it.
+    an email is real is most of the work of attacking it.
     """
     unknown = make_login_client(api_main, api_config, user=None)
-    unknown_response = login(unknown, username="nobody")
+    unknown_response = login(unknown, email="nobody@example.com")
     api_main.app.dependency_overrides.clear()
 
     wrong = make_login_client(api_main, api_config, make_user(api_passwords))
@@ -252,15 +252,15 @@ def test_an_unknown_username_and_a_wrong_password_are_answered_identically(
     assert unknown_response.json() == wrong_response.json()
 
 
-def test_the_username_is_lower_cased_before_the_lookup(api_main, api_config):
-    """Postgres stores usernames case-sensitively - see
+def test_the_email_is_lower_cased_before_the_lookup(api_main, api_config):
+    """Postgres stores emails case-sensitively - see
     tests/integration/test_api_users.py. Normalising here is what stops "Ada"
     and "ada" becoming two accounts nobody can tell apart."""
     client, calls = make_recording_login_client(api_main, api_config, user=None)
 
-    login(client, username="ADA")
+    login(client, email="ADA@EXAMPLE.COM")
 
-    assert calls[0] == "ada"
+    assert calls[0] == "ada@example.com"
 
 
 def test_the_password_hash_never_appears_in_the_response(
@@ -279,9 +279,25 @@ def test_the_password_hash_never_appears_in_the_response(
 def test_a_login_with_no_password_is_rejected(api_main, api_config):
     client = make_login_client(api_main, api_config, user=None)
 
-    response = client.post(LOGIN_PATH, json={"username": "ada"})
+    response = client.post(LOGIN_PATH, json={"email": "ada@example.com"})
 
     assert response.status_code == 422
+
+
+NOT_EMAILS = ["ada", "ada@", "@example.com", "ada@example", "a da@example.com", ""]
+
+
+@pytest.mark.parametrize("not_an_email", NOT_EMAILS)
+def test_a_login_with_something_that_is_not_an_email_is_rejected(
+    api_main, api_config, not_an_email
+):
+    """422 before the lookup, so a malformed address never reaches Postgres."""
+    client, calls = make_recording_login_client(api_main, api_config, user=None)
+
+    response = login(client, email=not_an_email)
+
+    assert response.status_code == 422
+    assert calls == []
 
 
 def test_a_login_password_longer_than_seventy_two_bytes_is_rejected(
@@ -301,9 +317,11 @@ EXPIRES_IN = 3600
 OTHER_SECRET = "a-different-secret-that-is-also-long-enough"
 
 
-def issue_token(api_tokens, username="ada", role="user", now=None, secret=SECRET):
+def issue_token(
+    api_tokens, email="ada@example.com", role="user", now=None, secret=SECRET
+):
     return api_tokens.create_token(
-        secret, username, role, now or datetime.now(UTC), EXPIRES_IN
+        secret, email, role, now or datetime.now(UTC), EXPIRES_IN
     )
 
 
@@ -311,7 +329,7 @@ def bearer(token):
     return {"Authorization": f"Bearer {token}"}
 
 
-def unsigned_token(username="ada", role="user"):
+def unsigned_token(email="ada@example.com", role="user"):
     """The alg:none forgery, assembled by hand because PyJWT will not make one.
 
     See tests/unit/test_api_tokens.py for the same trick at the unit level; this
@@ -319,7 +337,7 @@ def unsigned_token(username="ada", role="user"):
     """
     issued = int(datetime.now(UTC).timestamp())
     header = {"alg": "none", "typ": "JWT"}
-    claims = {"sub": username, "role": role, "iat": issued, "exp": issued + EXPIRES_IN}
+    claims = {"sub": email, "role": role, "iat": issued, "exp": issued + EXPIRES_IN}
     encode = lambda part: (  # noqa: E731
         base64.urlsafe_b64encode(json.dumps(part).encode()).rstrip(b"=").decode()
     )
@@ -444,12 +462,12 @@ NEW_USER_ID = 7
 
 
 def make_register_client(api_main, api_config, created_id=NEW_USER_ID):
-    """created_id=None is how "this username is taken" is expressed, which is
+    """created_id=None is how "this email is taken" is expressed, which is
     exactly what db.create_user returns on an ON CONFLICT DO NOTHING."""
     calls = []
 
-    def record_create(username, password_hash, role):
-        calls.append({"username": username, "password_hash": password_hash,
+    def record_create(email, password_hash, role):
+        calls.append({"email": email, "password_hash": password_hash,
                       "role": role})
         return created_id
 
@@ -459,9 +477,9 @@ def make_register_client(api_main, api_config, created_id=NEW_USER_ID):
     return TestClient(api_main.app), calls
 
 
-def register(client, username="ada", password=PASSWORD, **extra):
+def register(client, email="ada@example.com", password=PASSWORD, **extra):
     return client.post(
-        REGISTER_PATH, json={"username": username, "password": password, **extra}
+        REGISTER_PATH, json={"email": email, "password": password, **extra}
     )
 
 
@@ -502,17 +520,48 @@ def test_the_stored_password_is_a_hash_not_the_password(
     assert api_passwords.verify_password(PASSWORD, stored)
 
 
-def test_the_username_is_lower_cased_before_it_is_stored(api_main, api_config):
+def test_the_email_is_lower_cased_before_it_is_stored(api_main, api_config):
     """Stored lower-cased for the same reason login looks up lower-cased - the
     two have to agree or the account is unreachable the moment it is made."""
     client, calls = make_register_client(api_main, api_config)
 
-    register(client, username="ADA")
+    register(client, email="ADA@EXAMPLE.COM")
 
-    assert calls[0]["username"] == "ada"
+    assert calls[0]["email"] == "ada@example.com"
 
 
-def test_a_username_that_is_already_taken_is_rejected(api_main, api_config):
+def test_the_email_is_trimmed_before_it_is_stored(api_main, api_config):
+    """A pasted address often carries a space at either end."""
+    client, calls = make_register_client(api_main, api_config)
+
+    register(client, email="  ada@example.com ")
+
+    assert calls[0]["email"] == "ada@example.com"
+
+
+@pytest.mark.parametrize("not_an_email", NOT_EMAILS)
+def test_a_registration_with_something_that_is_not_an_email_is_rejected(
+    api_main, api_config, not_an_email
+):
+    client, calls = make_register_client(api_main, api_config)
+
+    response = register(client, email=not_an_email)
+
+    assert response.status_code == 422
+    assert calls == []
+
+
+def test_an_email_longer_than_the_limit_is_rejected(api_main, api_config):
+    """254 characters is the longest address SMTP can deliver to."""
+    client, calls = make_register_client(api_main, api_config)
+
+    response = register(client, email=f"{'a' * 250}@example.com")
+
+    assert response.status_code == 422
+    assert calls == []
+
+
+def test_an_email_that_is_already_taken_is_rejected(api_main, api_config):
     client, _ = make_register_client(api_main, api_config, created_id=None)
 
     response = register(client)
@@ -523,7 +572,7 @@ def test_a_username_that_is_already_taken_is_rejected(api_main, api_config):
 def test_a_registration_with_no_password_is_rejected(api_main, api_config):
     client, _ = make_register_client(api_main, api_config)
 
-    response = client.post(REGISTER_PATH, json={"username": "ada"})
+    response = client.post(REGISTER_PATH, json={"email": "ada@example.com"})
 
     assert response.status_code == 422
 
@@ -644,3 +693,184 @@ def test_an_alert_id_that_is_not_a_number_is_rejected(api_main, api_config, api_
     response = client.delete("/alerts/abc", headers=bearer(token))
 
     assert response.status_code == 422
+
+
+# ------------------------------------------------------------------ POST /alerts
+
+ALERTS_PATH = "/alerts"
+NEW_ALERT_ID = 11
+NEW_ALERT = {"symbol": "NVDA", "direction": "above", "threshold": 100.0}
+
+
+def make_create_client(api_main, api_config, created_id=NEW_ALERT_ID):
+    """created_id=None is how "that email has no account" is expressed,
+    which is what db.create_alert returns when INSERT ... SELECT finds nobody."""
+    calls = []
+
+    def record_create(email, symbol, direction, threshold):
+        calls.append({"email": email, "symbol": symbol,
+                      "direction": direction, "threshold": threshold})
+        return created_id
+
+    api_main.app.dependency_overrides[api_main.get_alert_creator] = (
+        lambda: record_create
+    )
+    use_test_secret(api_main, api_config)
+
+    return TestClient(api_main.app), calls
+
+
+def test_a_new_alert_belongs_to_the_user_in_the_token(api_main, api_config, api_tokens):
+    client, calls = make_create_client(api_main, api_config)
+    token = issue_token(api_tokens, email="ada@example.com")
+
+    response = client.post(ALERTS_PATH, json=NEW_ALERT, headers=bearer(token))
+
+    assert response.status_code == 201
+    assert response.json()["alert_id"] == NEW_ALERT_ID
+    assert calls[0]["email"] == "ada@example.com"
+
+
+def test_the_request_body_cannot_choose_the_owner(api_main, api_config, api_tokens):
+    """The owner comes from the signed token and nowhere else. Otherwise anyone
+    could create alerts in someone else's name."""
+    client, calls = make_create_client(api_main, api_config)
+    token = issue_token(api_tokens, email="ada@example.com")
+
+    client.post(
+        ALERTS_PATH,
+        json={**NEW_ALERT, "email": "grace@example.com"},
+        headers=bearer(token),
+    )
+
+    assert calls[0]["email"] == "ada@example.com"
+
+
+def test_a_new_alert_symbol_is_trimmed_and_upper_cased(
+    api_main, api_config, api_tokens
+):
+    """Stored the way the feed sends symbols, or it waits for a price that
+    never arrives."""
+    client, calls = make_create_client(api_main, api_config)
+    token = issue_token(api_tokens)
+
+    client.post(
+        ALERTS_PATH, json={**NEW_ALERT, "symbol": "  nvda "}, headers=bearer(token)
+    )
+
+    assert calls[0]["symbol"] == "NVDA"
+
+
+def test_creating_an_alert_needs_a_token(api_main, api_config):
+    client, calls = make_create_client(api_main, api_config)
+
+    response = client.post(ALERTS_PATH, json=NEW_ALERT)
+
+    assert response.status_code == 401
+    assert calls == []
+
+
+def test_an_alert_for_an_account_that_is_gone_is_unauthorised(
+    api_main, api_config, api_tokens
+):
+    """A valid token whose user was deleted after it was issued."""
+    client, _ = make_create_client(api_main, api_config, created_id=None)
+    token = issue_token(api_tokens)
+
+    response = client.post(ALERTS_PATH, json=NEW_ALERT, headers=bearer(token))
+
+    assert response.status_code == 401
+
+
+@pytest.mark.parametrize(
+    "bad_field",
+    [
+        {"direction": "sideways"},
+        {"threshold": 0},
+        {"threshold": -5},
+        {"symbol": ""},
+        {"symbol": "   "},
+        {"symbol": "X" * 11},
+    ],
+)
+def test_an_invalid_alert_is_rejected(api_main, api_config, api_tokens, bad_field):
+    client, calls = make_create_client(api_main, api_config)
+    token = issue_token(api_tokens)
+
+    response = client.post(
+        ALERTS_PATH, json={**NEW_ALERT, **bad_field}, headers=bearer(token)
+    )
+
+    assert response.status_code == 422
+    assert calls == []
+
+
+# ------------------------------------------------------------------- GET /alerts
+
+
+def _listed_alert(email="ada@example.com"):
+    return SimpleNamespace(
+        alert_id=5,
+        email=email,
+        symbol="NVDA",
+        direction="above",
+        threshold=100,
+        created_at=datetime(2024, 1, 1, 12, 0, tzinfo=UTC),
+        triggered_at=None,
+        triggered_price=None,
+    )
+
+
+def make_list_client(api_main, api_config, rows=()):
+    calls = []
+
+    def record_read(email):
+        calls.append(email)
+        return list(rows)
+
+    api_main.app.dependency_overrides[api_main.get_alert_reader] = lambda: record_read
+    use_test_secret(api_main, api_config)
+
+    return TestClient(api_main.app), calls
+
+
+def test_a_plain_user_lists_only_their_own_alerts(api_main, api_config, api_tokens):
+    client, calls = make_list_client(api_main, api_config)
+    token = issue_token(api_tokens, email="ada@example.com", role="user")
+
+    client.get(ALERTS_PATH, headers=bearer(token))
+
+    assert calls == ["ada@example.com"]
+
+
+def test_an_admin_lists_everyones_alerts(api_main, api_config, api_tokens):
+    """None is what tells read_alerts not to filter."""
+    client, calls = make_list_client(api_main, api_config)
+    token = issue_token(api_tokens, email="root@example.com", role="admin")
+
+    client.get(ALERTS_PATH, headers=bearer(token))
+
+    assert calls == [None]
+
+
+def test_listed_alerts_come_back_serialised(api_main, api_config, api_tokens):
+    client, _ = make_list_client(api_main, api_config, rows=[_listed_alert()])
+    token = issue_token(api_tokens)
+
+    response = client.get(ALERTS_PATH, headers=bearer(token))
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body[0]["alert_id"] == 5
+    assert body[0]["email"] == "ada@example.com"
+    assert body[0]["threshold"] == 100.0
+    assert body[0]["triggered_at"] is None
+
+
+def test_listing_alerts_needs_a_token(api_main, api_config):
+    client, calls = make_list_client(api_main, api_config)
+
+    response = client.get(ALERTS_PATH)
+
+    assert response.status_code == 401
+    assert calls == []

@@ -16,16 +16,6 @@ RECENT_TRADES_SQL = text(
     """
 )
 
-PENDING_ALERTS_SQL = text(
-    """
-    SELECT alert_id, symbol, direction, threshold
-      FROM price_alerts
-    WHERE triggered_at IS NULL
-    ORDER BY symbol
-    """
-)
-
-
 def get_engine(env=None):
     env = os.environ if env is None else env
 
@@ -61,6 +51,3 @@ def read_recent_trades(connection, window_start, max_rows):
         connection,
         params={"window_start": window_start, "max_rows": max_rows},
     )
-
-def read_pending_alerts(connection):
-    return connection.execute(PENDING_ALERTS_SQL).all()

@@ -17,7 +17,7 @@ def test_the_defaults_are_used_when_only_a_secret_is_given(api_config):
     config = api_config.load_config({"JWT_SECRET": SECRET})
 
     assert config.token_expiry_seconds == 3600
-    assert config.admin_username is None
+    assert config.admin_email is None
     assert config.admin_password is None
 
 
@@ -26,14 +26,14 @@ def test_values_are_read_from_the_environment(api_config):
         {
             "JWT_SECRET": SECRET,
             "JWT_EXPIRY_SECONDS": "900",
-            "API_ADMIN_USERNAME": "ada",
+            "API_ADMIN_EMAIL": "ada@example.com",
             "API_ADMIN_PASSWORD": "a-password",
         }
     )
 
     assert config.jwt_secret == SECRET
     assert config.token_expiry_seconds == 900
-    assert config.admin_username == "ada"
+    assert config.admin_email == "ada@example.com"
     assert config.admin_password == "a-password"
 
 
@@ -96,12 +96,27 @@ def test_an_expiry_of_exactly_a_day_is_accepted(api_config):
     assert config.token_expiry_seconds == api_config.MAX_EXPIRY_SECONDS
 
 
-def test_an_admin_username_without_a_password_is_rejected(api_config):
+def test_an_admin_email_without_a_password_is_rejected(api_config):
     with pytest.raises(api_config.ConfigError):
-        api_config.load_config({"JWT_SECRET": SECRET, "API_ADMIN_USERNAME": "ada"})
+        api_config.load_config(
+            {"JWT_SECRET": SECRET, "API_ADMIN_EMAIL": "ada@example.com"}
+        )
 
 
-def test_an_admin_password_without_a_username_is_rejected(api_config):
+def test_an_admin_email_that_is_not_an_email_is_rejected(api_config):
+    """Login refuses anything that is not an address, so a seeded admin named
+    plain "admin" would exist and still never be able to sign in."""
+    with pytest.raises(api_config.ConfigError):
+        api_config.load_config(
+            {
+                "JWT_SECRET": SECRET,
+                "API_ADMIN_EMAIL": "admin",
+                "API_ADMIN_PASSWORD": "a-password",
+            }
+        )
+
+
+def test_an_admin_password_without_an_email_is_rejected(api_config):
     """The dangerous direction: a password with nobody to belong to must not
     quietly seed an account under some default name."""
     with pytest.raises(api_config.ConfigError):

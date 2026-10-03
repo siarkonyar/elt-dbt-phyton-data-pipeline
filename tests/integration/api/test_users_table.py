@@ -9,47 +9,47 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
 INSERT_SQL = text(
-    "INSERT INTO users (username, password_hash, role) "
-    "VALUES (:username, :password_hash, :role)"
+    "INSERT INTO users (email, password_hash, role) "
+    "VALUES (:email, :password_hash, :role)"
 )
 
 # No role column, so the table's DEFAULT has to supply it.
 INSERT_WITHOUT_ROLE_SQL = text(
-    "INSERT INTO users (username, password_hash) VALUES (:username, :password_hash)"
+    "INSERT INTO users (email, password_hash) VALUES (:email, :password_hash)"
 )
 
-READ_SQL = text("SELECT role, created_at FROM users WHERE username = :username")
+READ_SQL = text("SELECT role, created_at FROM users WHERE email = :email")
 
 # The column is plain TEXT with no format constraint, so this only has to look
 # like a hash to a human reader.
 PASSWORD_HASH = "$2b$04$synthetic-value-for-tests-only"
 
 
-def insert_user(connection, username, role="user"):
+def insert_user(connection, email, role="user"):
     connection.execute(
         INSERT_SQL,
-        {"username": username, "password_hash": PASSWORD_HASH, "role": role},
+        {"email": email, "password_hash": PASSWORD_HASH, "role": role},
     )
 
 
-def read_user(connection, username):
-    return connection.execute(READ_SQL, {"username": username}).one()
+def read_user(connection, email):
+    return connection.execute(READ_SQL, {"email": email}).one()
 
 
-def test_a_duplicate_username_is_refused_by_the_database(api_tables):
+def test_a_duplicate_email_is_refused_by_the_database(api_tables):
     """Two accounts with one name would make the login lookup ambiguous, so
     UNIQUE settles it before any application code has to."""
-    insert_user(api_tables, "ada")
+    insert_user(api_tables, "ada@example.com")
 
     with pytest.raises(IntegrityError):
-        insert_user(api_tables, "ada")
+        insert_user(api_tables, "ada@example.com")
 
 
 def test_a_role_outside_admin_and_user_is_refused_by_the_database(api_tables):
     """A typo'd role must not become a third kind of user that no route knows
     how to authorise."""
     with pytest.raises(IntegrityError):
-        insert_user(api_tables, "ada", role="superuser")
+        insert_user(api_tables, "ada@example.com", role="superuser")
 
 
 def test_a_user_with_no_role_defaults_to_user(api_tables):
@@ -57,16 +57,16 @@ def test_a_user_with_no_role_defaults_to_user(api_tables):
     privileged account, never an admin."""
     api_tables.execute(
         INSERT_WITHOUT_ROLE_SQL,
-        {"username": "ada", "password_hash": PASSWORD_HASH},
+        {"email": "ada@example.com", "password_hash": PASSWORD_HASH},
     )
 
-    assert read_user(api_tables, "ada").role == "user"
+    assert read_user(api_tables, "ada@example.com").role == "user"
 
 
 def test_a_new_user_is_stamped_with_a_created_at(api_tables):
-    insert_user(api_tables, "grace")
+    insert_user(api_tables, "grace@example.com")
 
-    created_at = read_user(api_tables, "grace").created_at
+    created_at = read_user(api_tables, "grace@example.com").created_at
 
     assert created_at is not None
     # Timezone-aware, which is what proves the column is TIMESTAMPTZ and not a

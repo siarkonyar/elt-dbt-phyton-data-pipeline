@@ -1,6 +1,12 @@
+import re
 from dataclasses import dataclass
 
 import requests
+
+# Mirrors api/emails.py. The api re-checks every address, so this only saves a
+# round trip and lets the form explain the problem instead of showing a 422.
+EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+MAX_EMAIL_LENGTH = 254
 
 LOGIN_PATH = "/auth/login"
 REGISTER_PATH = "/auth/register"
@@ -55,15 +61,21 @@ def _url(base_url, path):
     return f"{base_url.rstrip('/')}{path}"
 
 
-def login(session, base_url, username, password, timeout_seconds):
+def is_email(value):
+    """Stripped first, because the api trims before it checks too."""
+    email = value.strip()
+    return len(email) <= MAX_EMAIL_LENGTH and EMAIL_PATTERN.match(email) is not None
+
+
+def login(session, base_url, email, password, timeout_seconds):
     response = session.post(
         _url(base_url, LOGIN_PATH),
-        json={"username": username, "password": password},
+        json={"email": email, "password": password},
         timeout=timeout_seconds,
     )
 
     if response.status_code == UNAUTHORIZED:
-        raise AuthError("Wrong username or password.")
+        raise AuthError("Wrong email or password.")
 
     response.raise_for_status()
     payload = response.json()
@@ -72,22 +84,22 @@ def login(session, base_url, username, password, timeout_seconds):
     return Credentials(token=payload["access_token"], role=payload["role"])
 
 
-def register(session, base_url, username, password, timeout_seconds):
-    """True if the account was created, False if the username was taken.
+def register(session, base_url, email, password, timeout_seconds):
+    """True if the account was created, False if the email was taken.
 
     No token comes back and none is sent: registering is not signing in. The
     caller creates the account, then logs in like anyone else.
 
-    A taken username is not an AuthError - nobody's credentials or session are
-    wrong. It is an ordinary outcome the form reports so the person picks
-    another name, the same shape as delete_alert's 404.
+    A taken email is not an AuthError - nobody's credentials or session are
+    wrong. It is an ordinary outcome the form reports so the person signs in
+    instead, the same shape as delete_alert's 404.
 
     The api decides the role, and it is always a plain user. Nothing here can
     ask for anything else.
     """
     response = session.post(
         _url(base_url, REGISTER_PATH),
-        json={"username": username, "password": password},
+        json={"email": email, "password": password},
         timeout=timeout_seconds,
     )
 
@@ -96,6 +108,44 @@ def register(session, base_url, username, password, timeout_seconds):
 
     response.raise_for_status()
     return True
+
+
+def create_alert(
+    session,
+    base_url,
+    token,
+    symbol,
+    direction,
+    threshold,
+    timeout_seconds,
+):
+    response = session.post(
+        _url(base_url, ALERTS_PATH),
+        json={"symbol": symbol, "direction": direction, "threshold": threshold},
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=timeout_seconds,
+    )
+
+    # Also what the api answers if the account was deleted after sign-in.
+    if response.status_code == UNAUTHORIZED:
+        raise AuthError("Your session has expired.")
+
+    response.raise_for_status()
+    return response.json()["alert_id"]
+
+
+def list_alerts(session, base_url, token, timeout_seconds):
+    response = session.get(
+        _url(base_url, ALERTS_PATH),
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=timeout_seconds,
+    )
+
+    if response.status_code == UNAUTHORIZED:
+        raise AuthError("Your session has expired.")
+
+    response.raise_for_status()
+    return response.json()
 
 
 def delete_alert(session, base_url, token, alert_id, timeout_seconds):

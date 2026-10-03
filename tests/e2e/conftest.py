@@ -33,6 +33,7 @@ DIAGNOSTIC_TABLES = (
     "rollup_runs",
     "stream_sessions",
     "users",
+    "price_alerts",
 )
 DIAGNOSTIC_SERVICES = ("fake_websocket", "stream", "rollup", "api")
 
@@ -45,11 +46,14 @@ ALERT_SQL = text("SELECT * FROM price_alerts WHERE alert_id = :alert_id")
 API_PORT = 8000
 API_TIMEOUT_SECONDS = 10
 
-# Matches API_ADMIN_USERNAME / API_ADMIN_PASSWORD in docker-compose.e2e.yaml.
-ADMIN_USERNAME = "admin"
+FAKE_WEBSOCKET_PORT = 8080
+FAKE_TIMEOUT_SECONDS = 10
+
+# Matches API_ADMIN_EMAIL / API_ADMIN_PASSWORD in docker-compose.e2e.yaml.
+ADMIN_EMAIL = "admin@example.com"
 ADMIN_PASSWORD = "e2e-admin-password"
 
-USER_USERNAME = "plain-user"
+USER_EMAIL = "plain-user@example.com"
 USER_PASSWORD = "a-plain-password"
 
 # The api has to finish its lifespan - create the users table and seed the
@@ -167,12 +171,12 @@ def wait_for_candle(e2e_engine, compose):
 
 @pytest.fixture(scope="session")
 def wait_for_triggered_alert(e2e_engine, compose):
-    """Waits for the rollup container to stamp one alert.
+    """Waits for the stream container to stamp one alert.
 
-    The overlay drops the rollup interval to 5s, so this normally returns on
-    the first or second poll. A timeout means the pipeline produced candles
-    but the alert path never ran, so the same row counts and container logs
-    the candle wait prints are what you want to see.
+    The stream checks alerts on every one-second flush, so this normally
+    returns on the first or second poll. A timeout means the trade arrived
+    but the alert check never fired it, so the row counts and the stream's
+    logs - where "alert check failed" would show up - are what you want.
     """
 
     def wait(alert_id):
@@ -205,6 +209,33 @@ def wait_for_triggered_alert(e2e_engine, compose):
 
 
 @pytest.fixture(scope="session")
+def push_trade(compose):
+    """Sends one trade through the fake websocket, right now.
+
+    Live alerts only judge trades that arrive after the alert exists, and the
+    fake's opening burst is long gone by then. Fails at once if no socket got
+    the trade: the stream is not connected, and a 120s alert wait would only
+    hide that.
+    """
+
+    def push(symbol, price):
+        host = compose.get_service_host("fake_websocket", FAKE_WEBSOCKET_PORT)
+        port = compose.get_service_port("fake_websocket", FAKE_WEBSOCKET_PORT)
+
+        response = requests.post(
+            f"http://{host}:{port}/trade",
+            json={"symbol": symbol, "price": price},
+            timeout=FAKE_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+
+        if response.json()["sent"] == 0:
+            pytest.fail("the fake websocket has no open socket - is stream connected?")
+
+    return push
+
+
+@pytest.fixture(scope="session")
 def api_url(compose):
     """Builds a url on whatever host port Docker picked for the api.
 
@@ -220,10 +251,10 @@ def api_url(compose):
     return url
 
 
-def _login(api_url, username, password):
+def _login(api_url, email, password):
     response = requests.post(
         api_url("/auth/login"),
-        json={"username": username, "password": password},
+        json={"email": email, "password": password},
         timeout=API_TIMEOUT_SECONDS,
     )
     response.raise_for_status()
@@ -243,13 +274,13 @@ def admin_token(api_url):
 
     while time.monotonic() < deadline:
         try:
-            return _login(api_url, ADMIN_USERNAME, ADMIN_PASSWORD)
+            return _login(api_url, ADMIN_EMAIL, ADMIN_PASSWORD)
         except requests.RequestException as error:
             last_problem = f"{type(error).__name__}: {error}"
         time.sleep(POLL_SECONDS)
 
     pytest.fail(
-        f"could not sign in as {ADMIN_USERNAME} within {LOGIN_TIMEOUT_SECONDS}s "
+        f"could not sign in as {ADMIN_EMAIL} within {LOGIN_TIMEOUT_SECONDS}s "
         f"- last problem: {last_problem}"
     )
 
@@ -269,8 +300,8 @@ def user_headers(api_url, admin_token):
     """
     requests.post(
         api_url("/auth/register"),
-        json={"username": USER_USERNAME, "password": USER_PASSWORD},
+        json={"email": USER_EMAIL, "password": USER_PASSWORD},
         timeout=API_TIMEOUT_SECONDS,
     )
 
-    return {"Authorization": f"Bearer {_login(api_url, USER_USERNAME, USER_PASSWORD)}"}
+    return {"Authorization": f"Bearer {_login(api_url, USER_EMAIL, USER_PASSWORD)}"}

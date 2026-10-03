@@ -1,6 +1,8 @@
 import os
 from dataclasses import dataclass
 
+from emails import is_email
+
 DEFAULTS = {
     "JWT_EXPIRY_SECONDS": "3600",
 }
@@ -22,7 +24,7 @@ class ConfigError(RuntimeError):
 class ApiConfig:
     jwt_secret: str
     token_expiry_seconds: int
-    admin_username: str | None
+    admin_email: str | None
     admin_password: str | None
 
 
@@ -61,27 +63,32 @@ def _read_secret(env):
 def _read_admin(env):
     """Both or neither.
 
-    A password with no username would otherwise seed an account under some
+    A password with no email would otherwise seed an account under some
     invented default name, which is how installations end up with credentials
     nobody chose. Unset is a valid answer: it means seed no admin at all.
     """
     # The password is not stripped - spaces can be part of one.
-    username = (env.get("API_ADMIN_USERNAME") or "").strip() or None
+    email = (env.get("API_ADMIN_EMAIL") or "").strip() or None
     password = env.get("API_ADMIN_PASSWORD") or None
 
-    if username and not password:
+    if email and not password:
         raise ConfigError(
-            "API_ADMIN_USERNAME is set but API_ADMIN_PASSWORD is not. Set both "
+            "API_ADMIN_EMAIL is set but API_ADMIN_PASSWORD is not. Set both "
             "to seed an admin, or neither to seed none."
         )
 
-    if password and not username:
+    if password and not email:
         raise ConfigError(
-            "API_ADMIN_PASSWORD is set but API_ADMIN_USERNAME is not. Set both "
+            "API_ADMIN_PASSWORD is set but API_ADMIN_EMAIL is not. Set both "
             "to seed an admin, or neither to seed none."
         )
 
-    return username, password
+    # Login refuses anything that is not an address, so an admin seeded under
+    # one would exist and still never be able to sign in.
+    if email and not is_email(email):
+        raise ConfigError(f"API_ADMIN_EMAIL must be an email address, got {email!r}")
+
+    return email, password
 
 
 def load_config(env=None):
@@ -99,11 +106,11 @@ def load_config(env=None):
             f"{expiry}. A token nobody can revoke should not outlive a day."
         )
 
-    admin_username, admin_password = _read_admin(env)
+    admin_email, admin_password = _read_admin(env)
 
     return ApiConfig(
         jwt_secret=secret,
         token_expiry_seconds=expiry,
-        admin_username=admin_username,
+        admin_email=admin_email,
         admin_password=admin_password,
     )

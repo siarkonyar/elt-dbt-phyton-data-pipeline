@@ -1,9 +1,19 @@
 import os
 from pathlib import Path
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 
 SCHEMA_PATH = Path(__file__).with_name("schema.sql")
+
+# price_alerts is created by the api, not by schema.sql here. Only the api can
+# create alerts, so until it has started there is nothing to wait for anyway.
+PENDING_ALERTS_SQL = text(
+    """
+    SELECT alert_id, symbol, direction, threshold
+      FROM price_alerts
+     WHERE triggered_at IS NULL
+    """
+)
 
 
 def get_engine(env=None):
@@ -28,3 +38,7 @@ def get_engine(env=None):
 def apply_schema(connection, schema_path=SCHEMA_PATH):
     """Run the CREATE TABLE IF NOT EXISTS statements in schema.sql."""
     connection.exec_driver_sql(schema_path.read_text(encoding="utf-8"))
+
+
+def read_pending_alerts(connection):
+    return connection.execute(PENDING_ALERTS_SQL).all()

@@ -138,11 +138,6 @@ def rollup_writer():
     return _load_service_module("rollup", "writer")
 
 @pytest.fixture(scope="session")
-def rollup_alerts():
-    return _load_service_module("rollup", "alerts")
-
-
-@pytest.fixture(scope="session")
 def rollup_db():
     return _load_service_module("rollup", "db")
 
@@ -176,7 +171,7 @@ def _load_with_bare_siblings(service, module_name, siblings):
                 sys.modules[name] = module
 
 
-ROLLUP_BARE_MODULES = ("candles", "config", "db", "writer", "alerts")
+ROLLUP_BARE_MODULES = ("candles", "config", "db", "writer")
 
 
 @pytest.fixture(scope="session")
@@ -195,6 +190,12 @@ def dashboard_queries():
 def dashboard_auth():
     """Imports requests and nothing of its own, so no siblings are needed."""
     return _load_service_module("dashboard", "auth")
+
+
+@pytest.fixture(scope="session")
+def dashboard_status():
+    """Pure rules with no Streamlit import, so it loads outside the image."""
+    return _load_service_module("dashboard", "status")
 
 
 # users has no foreign keys pointing at it, so no CASCADE is needed. Note this
@@ -255,8 +256,13 @@ def api_db():
     return _load_with_bare_siblings("api", "db", ("queries",))
 
 @pytest.fixture(scope="session")
+def api_emails():
+    return _load_service_module("api", "emails")
+
+@pytest.fixture(scope="session")
 def api_config():
-    return _load_service_module("api", "config")
+    """config.py does `from emails import ...` to check the seeded admin."""
+    return _load_with_bare_siblings("api", "config", ("emails",))
 
 @pytest.fixture(scope="session")
 def api_passwords():
@@ -271,8 +277,9 @@ def api_tokens():
 @pytest.fixture(scope="session")
 def api_auth():
     """auth.py does `from config import ...` and `from tokens import ...`, so
-    both have to be in place under their bare names before it loads."""
-    return _load_with_bare_siblings("api", "auth", ("config", "tokens"))
+    both have to be in place under their bare names before it loads - and
+    config needs emails before it."""
+    return _load_with_bare_siblings("api", "auth", ("emails", "config", "tokens"))
 
 @pytest.fixture
 def api_tables(connection, api_db):
@@ -286,11 +293,12 @@ def api_tables(connection, api_db):
 
 
 # Dependency order, because a sibling cannot be loaded before the module it
-# imports: queries before db, and config plus tokens before auth. main.py
-# imports auth, so auth comes last.
+# imports: queries before db, emails before config, and config plus tokens
+# before auth. main.py imports auth, so auth comes last.
 API_BARE_MODULES = (
     "queries",
     "serialize",
+    "emails",
     "config",
     "passwords",
     "tokens",

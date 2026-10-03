@@ -10,7 +10,7 @@ import pytest
 import requests
 
 BASE_URL = "http://api:8000"
-USERNAME = "ada"
+EMAIL = "ada@example.com"
 PASSWORD = "correct-horse-battery-staple"
 TOKEN = "header.payload.signature"
 TIMEOUT = 10.0
@@ -38,9 +38,21 @@ class FakeSession:
         self.response = response
         self.requests = []
 
-    def post(self, url, json=None, timeout=None):
+    def post(self, url, json=None, headers=None, timeout=None):
         self.requests.append(
-            {"method": "POST", "url": url, "json": json, "timeout": timeout}
+            {
+                "method": "POST",
+                "url": url,
+                "json": json,
+                "headers": headers,
+                "timeout": timeout,
+            }
+        )
+        return self.response
+
+    def get(self, url, headers=None, timeout=None):
+        self.requests.append(
+            {"method": "GET", "url": url, "headers": headers, "timeout": timeout}
         )
         return self.response
 
@@ -57,21 +69,21 @@ def token_response(role="user"):
 
 
 def do_login(dashboard_auth, session, base_url=BASE_URL):
-    return dashboard_auth.login(session, base_url, USERNAME, PASSWORD, TIMEOUT)
+    return dashboard_auth.login(session, base_url, EMAIL, PASSWORD, TIMEOUT)
 
 
 def do_delete(dashboard_auth, session, alert_id=ALERT_ID):
     return dashboard_auth.delete_alert(session, BASE_URL, TOKEN, alert_id, TIMEOUT)
 
 
-def test_login_posts_the_username_and_password_to_the_login_path(dashboard_auth):
+def test_login_posts_the_email_and_password_to_the_login_path(dashboard_auth):
     session = FakeSession(token_response())
 
     do_login(dashboard_auth, session)
 
     sent = session.requests[0]
     assert sent["url"] == f"{BASE_URL}{dashboard_auth.LOGIN_PATH}"
-    assert sent["json"] == {"username": USERNAME, "password": PASSWORD}
+    assert sent["json"] == {"email": EMAIL, "password": PASSWORD}
 
 
 def test_login_sends_the_configured_timeout(dashboard_auth):
@@ -188,19 +200,19 @@ def test_an_expired_token_on_delete_raises_an_auth_error(dashboard_auth):
 
 
 def do_register(dashboard_auth, session, base_url=BASE_URL):
-    return dashboard_auth.register(session, base_url, USERNAME, PASSWORD, TIMEOUT)
+    return dashboard_auth.register(session, base_url, EMAIL, PASSWORD, TIMEOUT)
 
 
-def test_register_posts_the_username_and_password_to_the_register_path(dashboard_auth):
+def test_register_posts_the_email_and_password_to_the_register_path(dashboard_auth):
     session = FakeSession(
-        FakeResponse(status_code=201, payload={"username": USERNAME, "role": "user"})
+        FakeResponse(status_code=201, payload={"email": EMAIL, "role": "user"})
     )
 
     do_register(dashboard_auth, session)
 
     sent = session.requests[0]
     assert sent["url"] == f"{BASE_URL}{dashboard_auth.REGISTER_PATH}"
-    assert sent["json"] == {"username": USERNAME, "password": PASSWORD}
+    assert sent["json"] == {"email": EMAIL, "password": PASSWORD}
 
 
 def test_register_sends_the_configured_timeout(dashboard_auth):
@@ -213,16 +225,16 @@ def test_register_sends_the_configured_timeout(dashboard_auth):
 
 def test_a_created_account_reports_success(dashboard_auth):
     session = FakeSession(
-        FakeResponse(status_code=201, payload={"username": USERNAME, "role": "user"})
+        FakeResponse(status_code=201, payload={"email": EMAIL, "role": "user"})
     )
 
     assert do_register(dashboard_auth, session) is True
 
 
-def test_a_username_that_is_taken_reports_failure(dashboard_auth):
+def test_an_email_that_is_taken_reports_failure(dashboard_auth):
     """False, not an exception, and not an AuthError.
 
-    A taken username is not a credentials problem - nobody's session is wrong.
+    A taken email is not a credentials problem - nobody's session is wrong.
     It is an ordinary outcome the form can report so the person picks another
     name, which is the same shape as delete_alert's 404.
     """
@@ -268,3 +280,111 @@ def test_an_expired_token_is_not_reported_as_a_permission_problem(dashboard_auth
         do_delete(dashboard_auth, session)
 
     assert not isinstance(caught.value, dashboard_auth.NotAllowedError)
+
+
+# ------------------------------------------------------------ create and list
+
+NEW_ALERT_ID = 11
+
+
+def do_create(dashboard_auth, session):
+    return dashboard_auth.create_alert(
+        session, BASE_URL, TOKEN, "NVDA", "above", 100.0, TIMEOUT
+    )
+
+
+def do_list(dashboard_auth, session):
+    return dashboard_auth.list_alerts(session, BASE_URL, TOKEN, TIMEOUT)
+
+
+def test_creating_an_alert_posts_the_three_fields_with_the_token(dashboard_auth):
+    """No email in the body: the api takes the owner from the token."""
+    session = FakeSession(
+        FakeResponse(status_code=201, payload={"alert_id": NEW_ALERT_ID})
+    )
+
+    do_create(dashboard_auth, session)
+
+    sent = session.requests[0]
+    assert sent["url"] == f"{BASE_URL}{dashboard_auth.ALERTS_PATH}"
+    assert sent["json"] == {"symbol": "NVDA", "direction": "above", "threshold": 100.0}
+    assert sent["headers"]["Authorization"] == f"Bearer {TOKEN}"
+    assert sent["timeout"] == TIMEOUT
+
+
+def test_a_created_alert_hands_back_its_id(dashboard_auth):
+    session = FakeSession(
+        FakeResponse(status_code=201, payload={"alert_id": NEW_ALERT_ID})
+    )
+
+    assert do_create(dashboard_auth, session) == NEW_ALERT_ID
+
+
+def test_an_expired_token_on_create_raises_an_auth_error(dashboard_auth):
+    """Same handling as delete: the page signs the person out."""
+    session = FakeSession(
+        FakeResponse(status_code=401, error=requests.HTTPError("401 Unauthorized"))
+    )
+
+    with pytest.raises(dashboard_auth.AuthError):
+        do_create(dashboard_auth, session)
+
+
+def test_a_server_failure_during_create_reaches_the_caller(dashboard_auth):
+    session = FakeSession(
+        FakeResponse(status_code=500, error=requests.HTTPError("500 Server Error"))
+    )
+
+    with pytest.raises(requests.HTTPError):
+        do_create(dashboard_auth, session)
+
+
+def test_listing_alerts_gets_the_alert_path_with_the_token(dashboard_auth):
+    session = FakeSession(FakeResponse(status_code=200, payload=[]))
+
+    do_list(dashboard_auth, session)
+
+    sent = session.requests[0]
+    assert sent["method"] == "GET"
+    assert sent["url"] == f"{BASE_URL}{dashboard_auth.ALERTS_PATH}"
+    assert sent["headers"]["Authorization"] == f"Bearer {TOKEN}"
+    assert sent["timeout"] == TIMEOUT
+
+
+def test_listed_alerts_come_back_as_the_api_sent_them(dashboard_auth):
+    alerts = [{"alert_id": 5, "email": "ada@example.com", "symbol": "NVDA"}]
+    session = FakeSession(FakeResponse(status_code=200, payload=alerts))
+
+    assert do_list(dashboard_auth, session) == alerts
+
+
+def test_an_expired_token_on_list_raises_an_auth_error(dashboard_auth):
+    session = FakeSession(
+        FakeResponse(status_code=401, error=requests.HTTPError("401 Unauthorized"))
+    )
+
+    with pytest.raises(dashboard_auth.AuthError):
+        do_list(dashboard_auth, session)
+
+
+# ------------------------------------------------------------------- is_email
+
+
+@pytest.mark.parametrize("email", [EMAIL, "  Ada@Example.com ", "a@b.io"])
+def test_a_well_formed_address_is_an_email(dashboard_auth, email):
+    """Surrounding spaces are fine - the api trims them before it checks."""
+    assert dashboard_auth.is_email(email)
+
+
+@pytest.mark.parametrize(
+    "not_an_email",
+    ["ada", "ada@", "@example.com", "ada@example", "a da@example.com", ""],
+)
+def test_anything_else_is_not_an_email(dashboard_auth, not_an_email):
+    assert not dashboard_auth.is_email(not_an_email)
+
+
+def test_an_address_longer_than_the_limit_is_not_an_email(dashboard_auth):
+    too_long = f"{'a' * dashboard_auth.MAX_EMAIL_LENGTH}@example.com"
+
+    assert not dashboard_auth.is_email(too_long)
