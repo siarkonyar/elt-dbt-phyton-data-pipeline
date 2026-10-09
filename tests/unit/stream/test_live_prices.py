@@ -1,6 +1,6 @@
 from datetime import UTC, date, datetime
 
-from live_prices import merge
+from live_prices import from_redis, merge, to_redis
 from socket_client import Trade
 
 DAY = date(2026, 10, 8)
@@ -83,3 +83,19 @@ def test_the_old_values_are_not_modified():
     merge(OLD, BATCH)
 
     assert OLD == before
+
+
+# --- to_redis / from_redis ---
+
+def test_every_value_is_stored_as_a_string():
+    """Redis has no numbers or dates, only strings."""
+    assert all(isinstance(value, str) for value in to_redis(OLD).values())
+
+
+def test_values_come_back_from_redis_unchanged():
+    assert from_redis(to_redis(OLD)) == OLD
+
+
+def test_a_missing_hash_reads_as_empty():
+    """HGETALL on a key that does not exist returns {}."""
+    assert from_redis({}) == {}

@@ -77,5 +77,24 @@
 - Step 2a implemented (2026-10-09): tests/unit/stream/test_live_prices.py (7 tests
   from the learner's table) + stream/live_prices.py merge stub. Verified RED: 7
   fail with NotImplementedError; ruff clean. Run with .venv/bin/python.
-- Learner now writes merge(old, trades) to make the tests pass.
+- Learner wrote merge (2026-10-09) with hints (max/min with key, old.get).
+  First version: missing `return`, attribute access on a dict (old.day_open).
+  Fixed after review; 7/7 tests pass. Logic designed and written by learner.
+  Remaining: ruff W292 (missing trailing newline) for learner to fix.
+- Demonstrated understanding: latest/earliest by time via max/min key; combining
+  old state with batch; building a new dict instead of mutating old.
+- Needs reinforcement: dict vs attribute access; functions must return.
+- Contract to keep in 2b: merge trusts old is from the same day; caller seeds
+  when hash is missing or from another day.
+- Redis failure rules (learner, 2026-10-09, after Claude explained crash-loop
+  and no-timeout behaviour + timeouts/failure isolation): skip the Redis update,
+  keep inserting, timeout under a second. Learner chose re-seed after a failure
+  (next flush treats every hash as missing).
+- Step 2b implemented (2026-10-09): redis==7.0.1; StreamConfig.redis_url with
+  default; live_prices.py: REDIS_TIMEOUT_SECONDS=0.5, to_redis/from_redis,
+  connect, read_live_prices/write_live_prices (one pipeline each); db.py:
+  DAY_STATS_SQL + read_day_stats (one query for all symbols, UTC day range).
+  Unit: 321 pass, ruff clean. Integration test_day_stats.py written but SKIPPED
+  (no local test DB). Redis read/write untested until step 4.
+- Next: step 2c — wire into flush_loop with failure rules and re-seed flag.
 - Before step 3: dashboard symbol source — STOCK_SYMBOLS from .env vs SCAN price:* keys.
