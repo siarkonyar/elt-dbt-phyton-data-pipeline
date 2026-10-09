@@ -12,6 +12,10 @@ login and price alerts.
 - Confirmed design (not implemented): stream writes one hash per symbol every
   flush; dashboard reads it. If a symbol's hash is missing, stream seeds day stats
   from Postgres once. No Redis persistence — Redis is a rebuildable cache.
+- Confirmed (not implemented): hash holds `day`; "today" = New York
+  (America/New_York) date of the trade timestamp, chosen 2026-10-09 — LATEST_SQL
+  must use the same day; missing OR wrong-day hash -> seed from Postgres; dashboard blanks day
+  stats when hash.day != today. REDIS_URL defaults to redis://redis:6379/0 in code.
 
 ## Components
 - `stream/` — Finnhub websocket -> in-memory queue -> flush loop writes `raw_trades`
