@@ -11,11 +11,13 @@ import re
 import streamlit as st
 
 import auth
+import live_prices
 from db import get_destination_engine
 from status import ERROR, IDLE, OK, WARN
 
 # Inside the compose network the service name resolves.
 API_BASE_URL = os.environ.get("API_BASE_URL", "http://api:8000")
+REDIS_URL = os.environ.get("REDIS_URL", "redis://redis:6379/0")
 API_TIMEOUT_SECONDS = float(os.environ.get("API_TIMEOUT_SECONDS", "10"))
 STALE_AFTER_SECONDS = float(os.environ.get("STALE_AFTER_SECONDS", "90"))
 CANDLE_LAG_GRACE_SECONDS = 300
@@ -82,6 +84,12 @@ def engine():
 @st.cache_resource
 def api_session():
     return auth.build_session()
+
+
+@st.cache_resource
+def redis_client():
+    """One connection pool per server process, for the same reason as engine()."""
+    return live_prices.connect(REDIS_URL)
 
 
 def apply_styles():

@@ -106,4 +106,17 @@
   needs_reseed starts True per loop and is set when load or save fails.
   7 new unit tests; 328 unit pass, ruff clean. Flag lines in flush_loop not
   unit-tested (step 4 integration/e2e). Not run against a real Redis yet.
+- Step 3 decisions (learner, 2026-10-12): symbol list from STOCK_SYMBOLS, not a
+  SCAN (first picked SCAN, switched after the stale-key drawback); then asked
+  for STOCK_SYMBOLS as a code constant, not env (accepted manual sync risk);
+  whole-board fallback to LATEST_SQL when any symbol is missing or Redis errors.
+- Introduced (Claude explained): KEYS vs SCAN (blocking), TTL as the usual
+  answer to stale keys.
+- Step 3 implemented (2026-10-12): dashboard/live_prices.py (STOCK_SYMBOLS
+  constant, read_live_board -> LATEST_SQL-shaped frame or None, blanks day stats
+  when hash.day != UTC today); data.live_board (Redis, else latest());
+  ui.redis_client (cache_resource, REDIS_URL env default); markets.live_board
+  uses it; pipeline page unchanged (still data.latest). 5 new unit tests incl.
+  symbols == stream default; 333 unit pass, ruff clean. Streamlit wiring only
+  compiled (streamlit not in .venv), not run.
 - Before step 3: dashboard symbol source — STOCK_SYMBOLS from .env vs SCAN price:* keys.
