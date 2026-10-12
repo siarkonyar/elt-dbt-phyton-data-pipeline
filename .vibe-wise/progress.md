@@ -96,5 +96,14 @@
   DAY_STATS_SQL + read_day_stats (one query for all symbols, UTC day range).
   Unit: 321 pass, ruff clean. Integration test_day_stats.py written but SKIPPED
   (no local test DB). Redis read/write untested until step 4.
-- Next: step 2c — wire into flush_loop with failure rules and re-seed flag.
+- Learner asked for line-by-line explanations of DAY_STATS_SQL (SQL execution
+  order, ANY, range filter + index, GROUP BY, array_agg ORDER BY [1]) and of
+  zip(..., strict=True) over pipe.execute(). Introduced, not yet demonstrated.
+- Steps 1, 2a, 2b committed by learner (f4b8949, 5f8af5c, 24e7ff0).
+- Step 2c implemented (2026-10-09): load_live_prices/save_live_prices in
+  stream/main.py (log-and-carry-on like check_alerts); flush_loop loads before
+  insert, saves in try/else only after a successful insert with trades;
+  needs_reseed starts True per loop and is set when load or save fails.
+  7 new unit tests; 328 unit pass, ruff clean. Flag lines in flush_loop not
+  unit-tested (step 4 integration/e2e). Not run against a real Redis yet.
 - Before step 3: dashboard symbol source — STOCK_SYMBOLS from .env vs SCAN price:* keys.

@@ -8,7 +8,8 @@ from alerts import find_triggered
 from backoff import ExponentialBackoff
 from buffer import drain
 from config import ConfigError, load_config
-from db import apply_schema, get_engine, read_pending_alerts
+from db import apply_schema, get_engine, read_day_stats, read_pending_alerts
+from live_prices import connect, merge, read_live_prices, write_live_prices
 from market_status import build_session, fetch_market_status
 from socket_client import TRADE, FinnhubSocket
 from writer import (
@@ -68,17 +69,67 @@ def check_alerts(engine, trades):
         return 0
 
 
-def flush_loop(config, engine, http, events, session_id, trades_queue):
+def load_live_prices(client, engine, trades, reseed):
+    """Each batch symbol's stored values, seeded from Postgres wherever Redis
+    has nothing for today. Runs before the insert, so a seed never already
+    holds this batch. None means this flush skips Redis."""
+    if not trades:
+        return {}
+
+    symbols = sorted({trade.symbol for trade in trades})
+    day = max(trade.trade_ts for trade in trades).date()
+
+    try:
+        stored = {} if reseed else read_live_prices(client, symbols)
+        stale = [s for s in symbols if stored.get(s, {}).get("day") != day]
+        if not stale:
+            return stored
+
+        with engine.begin() as connection:
+            seeded = read_day_stats(connection, stale, day)
+        return {**stored, **seeded}
+    except Exception as error:
+        print(
+            f"live prices not loaded: {type(error).__name__}: {error}",
+            file=sys.stderr,
+        )
+        return None
+
+
+def save_live_prices(client, stored, trades):
+    """True once Redis holds this batch. Called only after the insert worked,
+    so Redis never counts a trade that Postgres does not have."""
+    symbols = {trade.symbol for trade in trades}
+
+    try:
+        write_live_prices(client, {
+            symbol: merge(stored[symbol], [t for t in trades if t.symbol == symbol])
+            for symbol in symbols
+        })
+        return True
+    except Exception as error:
+        print(
+            f"live prices not saved: {type(error).__name__}: {error}",
+            file=sys.stderr,
+        )
+        return False
+
+
+def flush_loop(config, engine, redis_client, http, events, session_id, trades_queue):
     """Writes once a second until the socket closes. Runs on the main thread."""
     reported = 0
     status = None
     next_status_at = 0.0
     next_log_at = 0.0
+    # A crash between an insert and its Redis write would leave a hash short
+    # of that batch, so every loop starts by rebuilding from Postgres.
+    needs_reseed = True
 
     while True:
         time.sleep(config.flush_interval_seconds)
 
         trades = drain(trades_queue, config.flush_max_rows)
+        stored = load_live_prices(redis_client, engine, trades, needs_reseed)
 
         if time.monotonic() >= next_status_at:
             status = safe_market_status(config, http) or status
@@ -102,6 +153,12 @@ def flush_loop(config, engine, http, events, session_id, trades_queue):
             reported = seen
         except Exception as error:
             print(f"write failed: {type(error).__name__}: {error}", file=sys.stderr)
+        else:
+            # An empty flush changes nothing, so it must not clear the flag.
+            if trades:
+                needs_reseed = stored is None or not save_live_prices(
+                    redis_client, stored, trades
+                )
 
         fired = check_alerts(engine, trades)
 
@@ -118,7 +175,7 @@ def flush_loop(config, engine, http, events, session_id, trades_queue):
         if events.closed.is_set():
             break
 
-def run_once(config, engine, http, reconnects):
+def run_once(config, engine, redis_client, http, reconnects):
     """Connects, streams until the socket drops, returns what happened."""
     trades_queue = queue.Queue()
     events = SocketEvents()
@@ -133,7 +190,9 @@ def run_once(config, engine, http, reconnects):
     thread.start()
 
     try:
-        flush_loop(config, engine, http, events, session_id, trades_queue)
+        flush_loop(
+            config, engine, redis_client, http, events, session_id, trades_queue
+        )
     finally:
         with engine.begin() as connection:
             finish_session(
@@ -153,6 +212,7 @@ def main():
         apply_schema(connection)
 
     http = build_session(config.api_key)
+    redis_client = connect(config.redis_url)
     backoff = ExponentialBackoff(
         config.reconnect_min_seconds, config.reconnect_max_seconds
     )
@@ -161,7 +221,7 @@ def main():
     print(f"streaming {', '.join(config.symbols)} from {config.ws_url}")
 
     while True:
-        events = run_once(config, engine, http, reconnects)
+        events = run_once(config, engine, redis_client, http, reconnects)
 
         if events.last_message_at is not None:
             backoff = backoff.reset()
