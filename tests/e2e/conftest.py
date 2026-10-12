@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 
 import pytest
+import redis
 import requests
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
@@ -45,6 +46,10 @@ ALERT_SQL = text("SELECT * FROM price_alerts WHERE alert_id = :alert_id")
 
 API_PORT = 8000
 API_TIMEOUT_SECONDS = 10
+
+REDIS_PORT = 6379
+# The key the stream writes and the dashboard reads.
+LIVE_PRICE_KEY = "price:{symbol}"
 
 FAKE_WEBSOCKET_PORT = 8080
 FAKE_TIMEOUT_SECONDS = 10
@@ -165,6 +170,57 @@ def wait_for_candle(e2e_engine, compose):
             time.sleep(POLL_SECONDS)
 
         pytest.fail(_diagnostics(e2e_engine, compose, symbol, trade_count))
+
+    return wait
+
+
+@pytest.fixture(scope="session")
+def e2e_redis(compose):
+    """Connects on whatever host port Docker happened to pick."""
+    host = compose.get_service_host("redis", REDIS_PORT)
+    port = compose.get_service_port("redis", REDIS_PORT)
+
+    client = redis.Redis(host=host, port=port, decode_responses=True)
+    yield client
+    client.close()
+
+
+@pytest.fixture(scope="session")
+def wait_for_live_price(e2e_redis, e2e_engine, compose):
+    """Waits until the stream has counted every expected trade into Redis.
+
+    A timeout shows what Redis holds next to the row counts: raw trades but
+    no hash means the stream's Redis update failed, and its logs will say
+    "live prices not loaded" or "not saved".
+    """
+
+    def wait(symbol, trades_today):
+        key = LIVE_PRICE_KEY.format(symbol=symbol)
+        deadline = time.monotonic() + POLL_TIMEOUT_SECONDS
+        stored = {}
+
+        while time.monotonic() < deadline:
+            stored = e2e_redis.hgetall(key)
+
+            if stored.get("trades_today") == str(trades_today):
+                return stored
+
+            time.sleep(POLL_SECONDS)
+
+        pytest.fail(
+            "\n".join(
+                [
+                    f"{key} never reached trades_today={trades_today} after "
+                    f"{POLL_TIMEOUT_SECONDS}s",
+                    f"redis holds: {stored or '(nothing)'}",
+                    "",
+                    "row counts:",
+                    *_row_counts(e2e_engine),
+                    "",
+                    *_service_logs(compose),
+                ]
+            )
+        )
 
     return wait
 

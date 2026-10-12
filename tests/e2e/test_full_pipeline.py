@@ -69,6 +69,18 @@ def test_candle_has_the_expected_ohlc(nvda_candle):
     assert prices == EXPECTED_OHLC
     assert nvda_candle.trade_count == NVDA_TRADES
 
+def test_stream_keeps_the_live_price_in_redis(nvda_candle, wait_for_live_price):
+    """The same four trades, summed up by the stream into Redis. The burst
+    is the whole day for NVDA here, so the day matches the candle and the
+    live price is the last trade by time: the close."""
+    stored = wait_for_live_price(SYMBOL, NVDA_TRADES)
+    day_open, day_high, day_low, close = EXPECTED_OHLC
+
+    assert float(stored["day_open"]) == day_open
+    assert float(stored["day_high"]) == day_high
+    assert float(stored["day_low"]) == day_low
+    assert float(stored["price"]) == close
+
 def test_second_symbol_also_produces_a_candle(nvda_candle, e2e_engine):
     """Nothing along the path is accidentally hardcoded to one symbol."""
     with e2e_engine.connect() as connection:
