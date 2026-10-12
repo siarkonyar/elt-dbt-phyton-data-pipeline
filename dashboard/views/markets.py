@@ -26,6 +26,7 @@ MINUTE_MILLISECONDS = 60_000
 RANGE_HOURS = sorted({1, 6, data.HISTORY_HOURS})
 
 engine = ui.engine()
+redis_client = ui.redis_client()
 
 
 def percent_change(price, day_open):
@@ -105,7 +106,7 @@ def live_board():
     session = data.newest(data.sessions(engine))
     ui.status_pill(status.stream_status(session, ui.STALE_AFTER_SECONDS))
 
-    latest = data.latest(engine)
+    latest = data.live_board(engine, redis_client)
     if latest.empty:
         st.info("No trades stored yet. Nothing arrives while the market is closed.")
         return

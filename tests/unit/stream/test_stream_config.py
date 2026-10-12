@@ -52,6 +52,16 @@ def test_defaults_are_applied_when_only_the_key_is_set():
     assert config.stale_after_seconds == 90.0
 
 
+def test_redis_defaults_to_the_compose_service():
+    assert load_config(env()).redis_url == "redis://redis:6379/0"
+
+
+def test_redis_url_can_be_overridden():
+    config = load_config(env(REDIS_URL="redis://localhost:6379/0"))
+
+    assert config.redis_url == "redis://localhost:6379/0"
+
+
 def test_the_default_symbols_are_used_when_none_are_given():
     config = load_config(env())
 

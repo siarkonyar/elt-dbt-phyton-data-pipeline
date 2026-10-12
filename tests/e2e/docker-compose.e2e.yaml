@@ -27,6 +27,11 @@ services:
     ports: !override
       - '5432'
 
+  redis:
+    # Same reason as above: the dev stack already holds 6379 on the host.
+    ports: !override
+      - '6379'
+
   stream:
     environment:
       # environment: beats env_file:, so these three win over .env

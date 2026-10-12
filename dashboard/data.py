@@ -6,11 +6,13 @@ has to ask whether a service has started before it can draw.
 """
 
 import os
+from datetime import UTC, datetime
 
 import pandas as pd
 import streamlit as st
 
 from db import table_exists
+from live_prices import read_live_board
 from queries import (
     CANDLE_STATUS_SQL,
     CANDLES_SQL,
@@ -46,6 +48,13 @@ def _read_if_exists(engine, table, sql):
 
 def latest(engine):
     return to_float(_read_if_exists(engine, "raw_trades", LATEST_SQL), PRICE_COLUMNS)
+
+
+def live_board(engine, redis_client):
+    board = read_live_board(redis_client, datetime.now(UTC).date())
+    if board is None:
+        return latest(engine)
+    return to_float(board, PRICE_COLUMNS)
 
 
 def sessions(engine):

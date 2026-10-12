@@ -18,6 +18,22 @@ services:
       retries: 20
       start_period: 5s
 
+  redis:
+    image: redis:7-alpine
+    # A cache only: every value here can be rebuilt from Postgres, so nothing
+    # is written to disk and a restart starts empty.
+    command: ['redis-server', '--save', '', '--appendonly', 'no']
+    ports:
+      # Localhost only: this Redis has no password.
+      - '127.0.0.1:6379:6379'
+    networks:
+      - elt_network
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
   stream:
     build:
       context: ./stream
@@ -34,6 +50,8 @@ services:
       - elt_network
     depends_on:
       destination_postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   rollup:

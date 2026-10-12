@@ -1,4 +1,5 @@
 import os
+from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
 
 from sqlalchemy import create_engine, text
@@ -12,6 +13,23 @@ PENDING_ALERTS_SQL = text(
     SELECT alert_id, symbol, direction, threshold
       FROM price_alerts
      WHERE triggered_at IS NULL
+    """
+)
+
+# Seeds a live price in Redis. A range on trade_ts rather than a cast to a
+# date, so the (symbol, trade_ts) index can serve it.
+DAY_STATS_SQL = text(
+    """
+    SELECT symbol,
+           count(*)                                AS trades_today,
+           (array_agg(price ORDER BY trade_ts))[1] AS day_open,
+           max(price)                              AS day_high,
+           min(price)                              AS day_low
+      FROM raw_trades
+     WHERE symbol = ANY(:symbols)
+       AND trade_ts >= :day_start
+       AND trade_ts <  :day_end
+     GROUP BY symbol
     """
 )
 
@@ -42,3 +60,28 @@ def apply_schema(connection, schema_path=SCHEMA_PATH):
 
 def read_pending_alerts(connection):
     return connection.execute(PENDING_ALERTS_SQL).all()
+
+
+def read_day_stats(connection, symbols, day):
+    """symbol -> its stats for one UTC day, {} for a symbol with no trades."""
+    day_start = datetime.combine(day, time(), tzinfo=UTC)
+    rows = connection.execute(
+        DAY_STATS_SQL,
+        {
+            "symbols": list(symbols),
+            "day_start": day_start,
+            "day_end": day_start + timedelta(days=1),
+        },
+    ).mappings()
+
+    found = {
+        row["symbol"]: {
+            "day": day,
+            "day_open": float(row["day_open"]),
+            "day_high": float(row["day_high"]),
+            "day_low": float(row["day_low"]),
+            "trades_today": row["trades_today"],
+        }
+        for row in rows
+    }
+    return {symbol: found.get(symbol, {}) for symbol in symbols}

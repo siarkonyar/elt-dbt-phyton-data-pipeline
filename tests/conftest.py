@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import redis
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -24,6 +25,9 @@ sys.path.insert(0, str(ROOT / "stream"))   # inserted last, so searched first
 import db  # noqa: E402  - stream/db.py, importable only after the line above
 
 LOCAL_TEST_DSN = "postgresql+psycopg2://postgres:{password}@localhost:5434/test_db"
+
+# Database 15 of the compose Redis: the dev stack's live prices sit in 0.
+LOCAL_TEST_REDIS_URL = "redis://localhost:6379/15"
 
 
 def pytest_collection_modifyitems(config, items):
@@ -100,6 +104,33 @@ def connection(engine):
             yield connection
         finally:
             transaction.rollback()
+
+
+@pytest.fixture
+def redis_client():
+    """A real Redis, emptied before and after every test.
+
+    The Redis twin of `connection`: CI sets TEST_REDIS_URL, locally it is the
+    compose Redis. Skips the test if neither answers.
+    """
+    client = redis.Redis.from_url(
+        os.environ.get("TEST_REDIS_URL", LOCAL_TEST_REDIS_URL),
+        socket_connect_timeout=1,
+        decode_responses=True,
+    )
+
+    try:
+        client.ping()
+    except redis.RedisError:
+        pytest.skip(
+            "no test Redis on localhost:6379. Start it with:\n"
+            "  docker compose up -d redis"
+        )
+
+    client.flushdb()
+    yield client
+    client.flushdb()
+    client.close()
 
 
 @pytest.fixture
@@ -196,6 +227,12 @@ def dashboard_auth():
 def dashboard_status():
     """Pure rules with no Streamlit import, so it loads outside the image."""
     return _load_service_module("dashboard", "status")
+
+
+@pytest.fixture(scope="session")
+def dashboard_live_prices():
+    """Redis to a DataFrame with no Streamlit import, like status above."""
+    return _load_service_module("dashboard", "live_prices")
 
 
 # users has no foreign keys pointing at it, so no CASCADE is needed. Note this
