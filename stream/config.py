@@ -13,6 +13,7 @@ DEFAULTS = {
     "MARKET_STATUS_INTERVAL_SECONDS": "60",
     "STALE_AFTER_SECONDS": "90",
     "REDIS_URL": "redis://redis:6379/0",
+    "CELERY_BROKER_URL": "redis://redis:6379/1",
 }
 
 class ConfigError(RuntimeError):
@@ -43,6 +44,7 @@ class StreamConfig:
     market_status_interval_seconds: float
     stale_after_seconds: float
     redis_url: str
+    celery_broker_url: str
 
     @property
     def ws_endpoint(self):
@@ -121,4 +123,5 @@ def load_config(env=None):
         market_status_interval_seconds=status_interval,
         stale_after_seconds=stale_after,
         redis_url=env.get("REDIS_URL") or DEFAULTS["REDIS_URL"],
+        celery_broker_url=env.get("CELERY_BROKER_URL") or DEFAULTS["CELERY_BROKER_URL"],
     )

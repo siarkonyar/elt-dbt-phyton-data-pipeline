@@ -3,3 +3,4 @@ SQLAlchemy==2.0.30
 psycopg2-binary==2.9.9
 websocket-client==1.8.0
 redis==6.4.0
+celery[redis]==5.6.3

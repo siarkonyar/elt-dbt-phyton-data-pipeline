@@ -62,6 +62,16 @@ def test_redis_url_can_be_overridden():
     assert config.redis_url == "redis://localhost:6379/0"
 
 
+def test_celery_broker_defaults_to_redis_database_1():
+    assert load_config(env()).celery_broker_url == "redis://redis:6379/1"
+
+
+def test_celery_broker_url_can_be_overridden():
+    config = load_config(env(CELERY_BROKER_URL="redis://localhost:6379/1"))
+
+    assert config.celery_broker_url == "redis://localhost:6379/1"
+
+
 def test_the_default_symbols_are_used_when_none_are_given():
     config = load_config(env())
 
