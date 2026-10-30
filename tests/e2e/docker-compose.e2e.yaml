@@ -69,3 +69,10 @@ services:
   dashboard:
     ports: !override
       - '8501'
+
+  worker:
+    environment:
+      DESTINATION_POSTGRES_PASSWORD: e2e
+      # Beats the real key a developer's .env may hold, so a test alert never
+      # sends a real email. With no key the task records a failure and stops.
+      RESEND_API_KEY: ''
