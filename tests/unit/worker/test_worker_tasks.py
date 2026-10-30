@@ -8,6 +8,7 @@ from contextlib import nullcontext
 from types import SimpleNamespace
 
 import pytest
+from celery.exceptions import MaxRetriesExceededError
 
 # The stream queues the task by this exact name (stream/notify.py). Spelled
 # out here so a rename on either side fails a test instead of losing emails.
@@ -16,7 +17,8 @@ STREAM_TASK_NAME = "tasks.send_alert_email"
 ALERT = SimpleNamespace(alert_id=7, email="ada@example.com")
 
 SENT = {"success": True, "message_id": "msg_1"}
-REFUSED = {"success": False, "error": "Resend is down"}
+RESEND_DOWN = {"success": False, "error": "Resend is down", "retry": True}
+REJECTED = {"success": False, "error": "Invalid `to` field", "retry": False}
 
 
 class FakeEngine:
@@ -33,8 +35,11 @@ class FakeEngine:
 
 @pytest.fixture
 def fakes(worker_tasks, monkeypatch):
-    """Records what the task read and sent. Tests change alert/result first."""
-    fakes = SimpleNamespace(alert=ALERT, result=SENT, read=[], sent=[], recorded=[])
+    """Records what the task read and sent. Tests change alert/result first;
+    `results` lines up one answer per try, after which `result` repeats."""
+    fakes = SimpleNamespace(
+        alert=ALERT, result=SENT, results=[], read=[], sent=[], recorded=[]
+    )
 
     def read_alert_to_email(connection, alert_id):
         fakes.read.append(alert_id)
@@ -42,7 +47,7 @@ def fakes(worker_tasks, monkeypatch):
 
     def send_alert_triggered(api_key, alert):
         fakes.sent.append((api_key, alert))
-        return fakes.result
+        return fakes.results.pop(0) if fakes.results else fakes.result
 
     def record_notification(connection, alert_id, result):
         fakes.recorded.append((alert_id, result))
@@ -73,10 +78,11 @@ def test_a_gone_or_unfired_alert_is_skipped_without_an_email(worker_tasks, fakes
     assert fakes.sent == []
 
 
-def test_a_refused_email_is_reported_as_failed(worker_tasks, fakes):
-    fakes.result = REFUSED
+def test_a_rejected_email_fails_without_a_retry(worker_tasks, fakes):
+    fakes.result = REJECTED
 
     assert worker_tasks.send_alert_email(7) == "failed"
+    assert len(fakes.sent) == 1
 
 
 def test_a_sent_email_is_recorded(worker_tasks, fakes):
@@ -85,12 +91,45 @@ def test_a_sent_email_is_recorded(worker_tasks, fakes):
     assert fakes.recorded == [(7, SENT)]
 
 
-def test_a_refused_email_is_recorded_too(worker_tasks, fakes):
-    fakes.result = REFUSED
+def test_a_rejected_email_is_recorded_too(worker_tasks, fakes):
+    fakes.result = REJECTED
 
     worker_tasks.send_alert_email(7)
 
-    assert fakes.recorded == [(7, REFUSED)]
+    assert fakes.recorded == [(7, REJECTED)]
+
+
+# .apply() runs the task here the way a worker would, retries included: each
+# retry runs straight away instead of after its countdown.
+
+
+def test_a_temporary_failure_is_retried_until_the_email_goes_out(
+    worker_tasks, fakes
+):
+    fakes.results = [RESEND_DOWN, SENT]
+
+    outcome = worker_tasks.send_alert_email.apply(args=[7])
+
+    assert outcome.get() == "sent"
+    assert len(fakes.sent) == 2
+    assert fakes.recorded == [(7, RESEND_DOWN), (7, SENT)]
+
+
+def test_the_task_gives_up_after_the_last_retry(worker_tasks, fakes):
+    fakes.result = RESEND_DOWN
+
+    outcome = worker_tasks.send_alert_email.apply(args=[7])
+
+    assert outcome.failed()
+    assert isinstance(outcome.result, MaxRetriesExceededError)
+    assert len(fakes.sent) == worker_tasks.MAX_RETRIES + 1
+    assert len(fakes.recorded) == worker_tasks.MAX_RETRIES + 1
+
+
+def test_each_wait_is_twice_the_last(worker_tasks):
+    waits = [worker_tasks.retry_countdown(retries) for retries in range(5)]
+
+    assert waits == [30, 60, 120, 240, 480]
 
 
 def test_a_skipped_alert_records_nothing(worker_tasks, fakes):
