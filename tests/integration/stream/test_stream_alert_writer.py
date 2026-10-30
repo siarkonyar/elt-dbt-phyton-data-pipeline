@@ -117,7 +117,7 @@ def test_check_alerts_fires_an_alert_from_a_live_trade(e2e_db):
         symbol="NVDA", trade_ts=TRADE_TIME, price=102.0, volume=1.0, conditions=""
     )
 
-    assert check_alerts(e2e_db, (spike,)) == 1
+    assert check_alerts(e2e_db, (spike,)) == [alert_id]
 
     with e2e_db.connect() as connection:
         row = read_alert(connection, alert_id)

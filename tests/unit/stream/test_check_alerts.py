@@ -32,12 +32,12 @@ class EngineWithNoAlertsTable:
 def test_an_empty_batch_does_not_touch_the_database():
     """Most flushes carry no trades while the market is closed. Reading the
     alerts table once a second for nothing would be pure waste."""
-    assert check_alerts(EngineThatMustNotBeUsed(), ()) == 0
+    assert check_alerts(EngineThatMustNotBeUsed(), ()) == []
 
 
 def test_a_database_failure_is_logged_and_never_raised(capsys):
     """The trades are already saved by the time this runs. A broken alert
     check must not take the stream down with it."""
-    assert check_alerts(EngineWithNoAlertsTable(), (A_TRADE,)) == 0
+    assert check_alerts(EngineWithNoAlertsTable(), (A_TRADE,)) == []
 
     assert "alert check failed" in capsys.readouterr().err
