@@ -347,3 +347,33 @@ API_BARE_MODULES = (
 @pytest.fixture(scope="session")
 def api_main():
     return _load_with_bare_siblings("api", "main", API_BARE_MODULES)
+
+#-----------worker-----------
+
+@pytest.fixture(scope="session")
+def worker_db():
+    return _load_service_module("worker", "db")
+
+
+@pytest.fixture(scope="session")
+def worker_emails():
+    """By path, because api/emails.py would otherwise answer to `emails`."""
+    return _load_service_module("worker", "emails")
+
+
+# tasks.py does `from db import ...` and `from emails import ...`. Neither of
+# those imports the other, so their order does not matter.
+WORKER_BARE_MODULES = ("db", "emails")
+
+
+@pytest.fixture(scope="session")
+def worker_tasks():
+    """Loading it opens no connection: _engine() waits for the first task."""
+    return _load_with_bare_siblings("worker", "tasks", WORKER_BARE_MODULES)
+
+
+@pytest.fixture
+def worker_tables(connection, worker_db):
+    """A connection with the worker's notification_history already created."""
+    worker_db.apply_schema(connection)
+    return connection
