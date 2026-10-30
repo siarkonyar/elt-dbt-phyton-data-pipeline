@@ -1,13 +1,19 @@
 import resend
+from resend.exceptions import ApplicationError, RateLimitError
 
-# The only sender Resend accepts before you verify a domain of your own, and
-# it delivers only to the address the Resend account was opened with.
 SENDER = "onboarding@resend.dev"
+
+#these are the only legit reasons to retry a task
+TEMPORARY_ERRORS = (ApplicationError, RateLimitError, RuntimeError)
 
 
 def send_alert_triggered(resend_api_key, alert):
     if not resend_api_key:
-        return {"success": False, "error": "RESEND_API_KEY not configured"}
+        return {
+            "success": False,
+            "error": "RESEND_API_KEY not configured",
+            "retry": False,
+        }
 
     resend.api_key = resend_api_key
 
@@ -32,4 +38,8 @@ def send_alert_triggered(resend_api_key, alert):
         })
         return {"success": True, "message_id": response["id"]}
     except Exception as error:
-        return {"success": False, "error": str(error)}
+        return {
+            "success": False,
+            "error": str(error),
+            "retry": isinstance(error, TEMPORARY_ERRORS),
+        }

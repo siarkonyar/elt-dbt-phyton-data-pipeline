@@ -13,6 +13,13 @@ CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://redis:6379/1")
 app = Celery("worker", broker=CELERY_BROKER_URL)
 logger = get_task_logger(__name__)
 
+MAX_RETRIES = 5
+FIRST_RETRY_SECONDS = 30
+
+
+def retry_countdown(retries):
+    return FIRST_RETRY_SECONDS * 2**retries
+
 
 @worker_init.connect
 def create_tables(**kwargs):
@@ -26,8 +33,8 @@ def create_tables(**kwargs):
 def _engine():
     return get_engine()
 
-@app.task(name="tasks.send_alert_email")
-def send_alert_email(alert_id):
+@app.task(bind=True, name="tasks.send_alert_email", max_retries=MAX_RETRIES)
+def send_alert_email(self, alert_id):
     with _engine().connect() as connection:
         alert = read_alert_to_email(connection, alert_id)
 
@@ -45,4 +52,7 @@ def send_alert_email(alert_id):
         return "sent"
 
     logger.warning("alert %s email failed: %s", alert_id, result["error"])
-    return "failed"
+    if not result["retry"]:
+        return "failed"
+
+    raise self.retry(countdown=retry_countdown(self.request.retries))
