@@ -111,9 +111,15 @@ services:
       context: ./worker
       dockerfile: Dockerfile
     restart: unless-stopped
+    env_file:
+      - ./.env
+    environment:
+      DESTINATION_POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     networks:
       - elt_network
     depends_on:
+      destination_postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
 
