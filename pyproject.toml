@@ -8,7 +8,7 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["rollup", "stream", "api", "dashboard"]
+source = ["rollup", "stream", "api", "dashboard", "worker"]
 omit = [
     "stream/main.py",   # an infinite loop; covering it proves little
     "dashboard/app.py", # a Streamlit script; importing it renders a page
@@ -26,7 +26,7 @@ target-version = "py311"
 # Each service runs with its own directory on sys.path, so `from db import ...`
 # means dashboard/db.py or rollup/db.py, not some package on PyPI. Without this
 # ruff calls those third-party and sorts them in with sqlalchemy.
-src = [".", "api", "dashboard", "rollup", "stream"]
+src = [".", "api", "dashboard", "rollup", "stream", "worker"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP"]
