@@ -16,6 +16,13 @@ ALERT_TO_EMAIL_SQL = text(
   """
 )
 
+RECORD_NOTIFICATION_SQL = text(
+  """
+    INSERT INTO notification_history (alert_id, status, message_id, error)
+    VALUES (:alert_id, :status, :message_id, :error)
+  """
+)
+
 def get_engine(env=None):
     env = os.environ if env is None else env
 
@@ -42,5 +49,17 @@ def apply_schema(connection, schema_path=SCHEMA_PATH):
 
 def read_alert_to_email(connection, alert_id):
     return connection.execute(ALERT_TO_EMAIL_SQL, {"alert_id": alert_id}).one_or_none()
+
+
+def record_notification(connection, alert_id, result):
+    connection.execute(
+        RECORD_NOTIFICATION_SQL,
+        {
+            "alert_id": alert_id,
+            "status": "sent" if result["success"] else "failed",
+            "message_id": result.get("message_id"),
+            "error": result.get("error"),
+        },
+    )
 
 
