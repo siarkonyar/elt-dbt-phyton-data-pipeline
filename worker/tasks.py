@@ -15,7 +15,7 @@ logger = get_task_logger(__name__)
 
 
 @worker_init.connect
-def create_tables():
+def create_tables(**kwargs):
     engine = get_engine()
     with engine.begin() as connection:
         apply_schema(connection)
