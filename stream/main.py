@@ -11,6 +11,7 @@ from config import ConfigError, load_config
 from db import apply_schema, get_engine, read_day_stats, read_pending_alerts
 from live_prices import connect, merge, read_live_prices, write_live_prices
 from market_status import build_session, fetch_market_status
+from notify import connect_broker, queue_alert_emails
 from socket_client import TRADE, FinnhubSocket
 from writer import (
     finish_session,
@@ -58,15 +59,17 @@ def safe_market_status(config, http):
 
 def check_alerts(engine, trades):
     if not trades:
-        return 0
+        return []
 
     try:
         with engine.begin() as connection:
             fired = find_triggered(read_pending_alerts(connection), trades)
-            return mark_triggered(connection, fired)
+            mark_triggered(connection, fired)
     except Exception as error:
         print(f"alert check failed: {type(error).__name__}: {error}", file=sys.stderr)
-        return 0
+        return []
+
+    return [alert["alert_id"] for alert in fired]
 
 
 def load_live_prices(client, engine, trades, reseed):
@@ -115,7 +118,15 @@ def save_live_prices(client, stored, trades):
         return False
 
 
-def flush_loop(config, engine, redis_client, http, events, session_id, trades_queue):
+def flush_loop(
+        config,
+        engine,
+        redis_client,
+        http, events,
+        session_id,
+        trades_queue,
+        broker
+    ):
     """Writes once a second until the socket closes. Runs on the main thread."""
     reported = 0
     status = None
@@ -163,7 +174,8 @@ def flush_loop(config, engine, redis_client, http, events, session_id, trades_qu
         fired = check_alerts(engine, trades)
 
         if fired:
-            print(f"{fired} alerts triggered")
+            print(f"{len(fired)} alerts triggered")
+            queue_alert_emails(broker, fired)
 
         if time.monotonic() >= next_log_at:
             print(
@@ -175,7 +187,7 @@ def flush_loop(config, engine, redis_client, http, events, session_id, trades_qu
         if events.closed.is_set():
             break
 
-def run_once(config, engine, redis_client, http, reconnects):
+def run_once(config, engine, redis_client, http, reconnects, broker):
     """Connects, streams until the socket drops, returns what happened."""
     trades_queue = queue.Queue()
     events = SocketEvents()
@@ -191,7 +203,13 @@ def run_once(config, engine, redis_client, http, reconnects):
 
     try:
         flush_loop(
-            config, engine, redis_client, http, events, session_id, trades_queue
+            config,
+            engine,
+            redis_client,
+            http, events,
+            session_id,
+            trades_queue,
+            broker
         )
     finally:
         with engine.begin() as connection:
@@ -213,6 +231,7 @@ def main():
 
     http = build_session(config.api_key)
     redis_client = connect(config.redis_url)
+    broker = connect_broker(config.celery_broker_url)
     backoff = ExponentialBackoff(
         config.reconnect_min_seconds, config.reconnect_max_seconds
     )
@@ -221,7 +240,7 @@ def main():
     print(f"streaming {', '.join(config.symbols)} from {config.ws_url}")
 
     while True:
-        events = run_once(config, engine, redis_client, http, reconnects)
+        events = run_once(config, engine, redis_client, http, reconnects, broker)
 
         if events.last_message_at is not None:
             backoff = backoff.reset()
